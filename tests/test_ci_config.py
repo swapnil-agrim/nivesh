@@ -54,3 +54,21 @@ def test_nightly() -> None:
     assert "report.md" in text
     uses = [s.get("uses", "") for j in n["jobs"].values() for s in j["steps"]]
     assert any(u.startswith("actions/upload-artifact") for u in uses)
+
+
+def test_ci_secret_scan_and_least_privilege_locked_in() -> None:
+    # lock-in (already true): CI fails on committed secrets using full history
+    ci = _load("ci.yml")
+    assert "gitleaks detect" in _run_text(ci)
+    assert ci["permissions"] == {"contents": "read"}
+
+
+def test_nightly_has_pii_scan_job() -> None:
+    n = _load("nightly.yml")
+    assert "tests/security" in _run_text({"jobs": {"pii-scan": n["jobs"]["pii-scan"]}})
+
+
+def test_ci_builds_docker_image_on_linux_only() -> None:
+    steps = _load("ci.yml")["jobs"]["ci"]["steps"]
+    (step,) = [s for s in steps if "docker build" in s.get("run", "")]
+    assert step["if"] == "runner.os == 'Linux'"

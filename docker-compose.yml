@@ -1,0 +1,16 @@
+# Single-service deployment. A scheduler service (nightly backup, daily jobs) is deferred to E11;
+# until then run `nivesh backup` from the host cron (docs/deploy/vm.md).
+services:
+  nivesh:
+    build: .
+    image: nivesh:local
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./data:/data
+    # Secrets are passed through from the host environment (no values in this file).
+    environment:
+      - ANTHROPIC_API_KEY
+    # Intentionally no `ports`: the agent makes outbound calls only.

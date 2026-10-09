@@ -5,11 +5,25 @@ deny-by-default tool surface. Claude Code interactive use reads the same `.claud
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
-from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeAgentOptions,
+    ResultMessage,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    UserMessage,
+    query,
+)
 
+from nivesh_agents.untrusted import GUARD
+from nivesh_core.config import Price
+from nivesh_core.cost import run_cost_inr
 from nivesh_core.errors import NiveshError
 from nivesh_core.redact import redact_text
+from nivesh_core.trace import Tracer, prompt_version
 from nivesh_mcp.registry import SERVERS
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +51,7 @@ def build_options(
         run_env["NIVESH_REFRESH"] = "1"
     return ClaudeAgentOptions(
         tools=[],
+        system_prompt=GUARD,
         allowed_tools=[f"mcp__{n}__{t}" for n, s in SERVERS.items() for t in s.tool_names],
         disallowed_tools=list(DISALLOWED),
         permission_mode="dontAsk",
@@ -52,16 +67,37 @@ def build_options(
     )
 
 
-def load_command(name: str, args: list[str]) -> str:
+def command_text(name: str) -> str:
+    """Raw `.claude/commands/<name>.md` text (also the input to the trace's prompt_version)."""
     if not _NAME_RE.match(name):
         raise AgentRunError(f"invalid command name {name!r}")
     path = ROOT / ".claude" / "commands" / f"{name}.md"
     if not path.is_file():
         raise AgentRunError(f"unknown command {name!r}: no .claude/commands/{name}.md")
-    text = path.read_text()
+    return path.read_text()
+
+
+def load_command(name: str, args: list[str]) -> str:
+    text = command_text(name)
     if text.startswith("---\n"):
         text = text.split("---\n", 2)[2]
     return text.replace("$ARGUMENTS", " ".join(args)).strip()
+
+
+def _trace_message(message: Any, tracer: Tracer) -> str | None:
+    """Record one SDK message; returns the model name when the message carries it."""
+    if isinstance(message, AssistantMessage):
+        for block in message.content:
+            if isinstance(block, TextBlock):
+                tracer.assistant_text(block.text)
+            elif isinstance(block, ToolUseBlock):
+                tracer.tool_call(block.id, block.name, block.input)
+        return message.model
+    if isinstance(message, UserMessage) and isinstance(message.content, list):
+        for block in message.content:
+            if isinstance(block, ToolResultBlock):
+                tracer.tool_result(block.tool_use_id, block.content, block.is_error or False)
+    return None
 
 
 async def run_command(
@@ -71,17 +107,43 @@ async def run_command(
     mode: str,
     refresh: bool = False,
     env: dict[str, str] | None = None,
+    tracer: Tracer | None = None,
+    prices: dict[str, Price] | None = None,
+    usd_inr: float = 90.0,
 ) -> str:
     prompt = load_command(name, args)
     options = build_options(mode=mode, refresh=refresh, env=env)
+    if tracer:
+        tracer.start(name, prompt_version(command_text(name)))
     final: ResultMessage | None = None
-    async for message in query(prompt=prompt, options=options):
-        if isinstance(message, ResultMessage):
-            final = message
-    if final is None:
-        raise AgentRunError("agent produced no result")
-    if final.is_error:
-        raise AgentRunError(
-            redact_text(final.result or "; ".join(final.errors or []) or final.subtype)
-        )
+    model: str | None = None
+    try:
+        async for message in query(prompt=prompt, options=options):
+            if tracer:
+                model = _trace_message(message, tracer) or model
+            if isinstance(message, ResultMessage):
+                final = message
+        if final is None:
+            raise AgentRunError("agent produced no result")
+        if final.is_error:
+            raise AgentRunError(
+                redact_text(final.result or "; ".join(final.errors or []) or final.subtype)
+            )
+    except Exception as e:
+        if tracer:
+            tracer.error(safe_error(e))
+        raise
+    finally:  # failed runs still cost tokens; record whatever usage was seen
+        if tracer and final is not None:
+            usage = final.usage or {}
+            in_tok = int(usage.get("input_tokens") or 0)
+            out_tok = int(usage.get("output_tokens") or 0)
+            model = model or next(iter(final.model_usage or {}), None)
+            cost, src = run_cost_inr(
+                model, in_tok, out_tok, prices or {}, usd_inr, final.total_cost_usd
+            )
+            tracer.result(
+                model=model, input_tokens=in_tok, output_tokens=out_tok,
+                cost_inr=cost, cost_source=src,
+            )  # fmt: skip
     return final.result or ""

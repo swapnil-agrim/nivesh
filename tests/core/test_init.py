@@ -28,7 +28,7 @@ def test_init_creates_private_stores(tmp_path: Path) -> None:
     for name in ("nivesh.sqlite", "nivesh.duckdb"):
         assert mode(d / name) == 0o600
     s = sqlite3.connect(d / "nivesh.sqlite")
-    assert s.execute("select max(version) from schema_version").fetchone() == (1,)
+    assert s.execute("select max(version) from schema_version").fetchone() == (2,)
     s.close()
     with duckdb.connect(str(d / "nivesh.duckdb")) as k:
         assert k.execute("select max(version) from schema_version").fetchone() == (1,)
@@ -102,3 +102,10 @@ def test_invalid_profile_fails_cli_with_clear_message(tmp_path: Path) -> None:
     assert r.exit_code != 0
     assert "max_position_pct" in r.output
     assert "Traceback" not in r.output
+
+
+def test_run_dir_is_private(tmp_path: Path) -> None:
+    from nivesh_core.paths import run_dir
+
+    d = run_dir(tmp_path, 7)
+    assert d == tmp_path / "runs" / "7" and mode(d) == 0o700 and mode(d.parent) == 0o700

@@ -6,6 +6,14 @@ on:
 permissions:
   contents: read
 jobs:
+  pii-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - name: PII end-to-end scan
+        run: uv run pytest tests/security -q
   nightly:
     runs-on: ubuntu-latest
     steps:

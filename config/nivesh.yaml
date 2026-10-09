@@ -3,3 +3,9 @@ mode: dev
 data_dir: data
 # Optional: set the Anthropic credential reference here (a ref: name, never a value).
 ttls: {price: 1d, fundamentals: 7d, nav: 1d, mf_holdings: 31d}
+# Example prices (USD per million tokens) and FX; replace with current figures. Used by the cost meter.
+prices:
+  claude-sonnet-example: {input_usd_per_mtok: 3.0, output_usd_per_mtok: 15.0}
+usd_inr: 90.0
+# registered_ip: 203.0.113.7   # egress IP registered with the broker (optional)
+# backup: {target: /backups, recipient: age1..., retention_days: 30}

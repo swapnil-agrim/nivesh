@@ -16,17 +16,17 @@ def conn() -> sqlite3.Connection:
     return sqlite3.connect(":memory:", isolation_level=None)
 
 
-def migrations_with_0002(tmp_path: Path, sql: str) -> Path:
+def migrations_with_next(tmp_path: Path, sql: str) -> Path:
     d = tmp_path / "m"
     shutil.copytree(SQLITE_DIR, d)
-    (d / "0002_add_col.sql").write_text(sql)
+    (d / "0003_add_col.sql").write_text(sql)
     return d
 
 
 def test_fresh_db_gets_latest_version() -> None:
     c = conn()
     migrate.apply(c, SQLITE_DIR)
-    assert migrate.current_version(c) == migrate.latest_version(SQLITE_DIR) == 1
+    assert migrate.current_version(c) == migrate.latest_version(SQLITE_DIR) == 2
     tables = {r[0] for r in c.execute("select name from sqlite_master where type='table'")}
     assert {"schema_version", "security", "account", "run"} <= tables
 
@@ -34,24 +34,24 @@ def test_fresh_db_gets_latest_version() -> None:
 def test_upgrade_preserves_fixture_rows(tmp_path: Path) -> None:
     c = conn()
     c.executescript(FIXTURE.read_text())
-    d = migrations_with_0002(tmp_path, "ALTER TABLE security ADD COLUMN sector TEXT;")
+    d = migrations_with_next(tmp_path, "ALTER TABLE security ADD COLUMN sector TEXT;")
     migrate.apply(c, d)
-    assert migrate.current_version(c) == 2
+    assert migrate.current_version(c) == 3
     rows = c.execute("select symbol, name, sector from security order by id").fetchall()
     assert rows == [("TESTCO", "Test Co", None), ("DEMO", "Demo Inc", None)]
     migrate.apply(c, d)  # rerun is a no-op
-    assert migrate.current_version(c) == 2
-    assert c.execute("select count(*) from schema_version").fetchone() == (2,)
+    assert migrate.current_version(c) == 3
+    assert c.execute("select count(*) from schema_version").fetchone() == (3,)
 
 
 def test_failing_migration_rolls_back(tmp_path: Path) -> None:
     c = conn()
     c.executescript(FIXTURE.read_text())
     bad = "ALTER TABLE security ADD COLUMN sector TEXT;\nTHIS IS NOT SQL;"
-    d = migrations_with_0002(tmp_path, bad)
-    with pytest.raises(MigrationError, match="0002_add_col"):
+    d = migrations_with_next(tmp_path, bad)
+    with pytest.raises(MigrationError, match="0003_add_col"):
         migrate.apply(c, d)
-    assert migrate.current_version(c) == 1
+    assert migrate.current_version(c) == 2
     cols = [r[1] for r in c.execute("pragma table_info(security)")]
     assert "sector" not in cols  # first statement was rolled back too
     assert not c.in_transaction
@@ -68,8 +68,25 @@ def test_downgrade_refused() -> None:
 def test_semicolon_in_string_literal_is_one_statement(tmp_path: Path) -> None:
     c = conn()
     migrate.apply(c, SQLITE_DIR)
-    d = migrations_with_0002(
+    d = migrations_with_next(
         tmp_path, "CREATE TABLE note (t TEXT);\nINSERT INTO note VALUES ('a;b');"
     )
     migrate.apply(c, d)
     assert c.execute("select t from note").fetchone() == ("a;b",)
+
+
+def test_0002_on_v1_fixture_keeps_rows_and_defaults() -> None:
+    c = conn()
+    c.executescript(FIXTURE.read_text())
+    c.execute("insert into run (command, started_at, status) values ('old', 't', 'ok')")
+    migrate.apply(c, SQLITE_DIR)
+    assert migrate.current_version(c) == 2
+    assert c.execute("select count(*) from security").fetchone()[0] >= 1
+    row = c.execute(
+        "select command, run_dir, model, input_tokens, output_tokens, paid_data_inr, tier from run"
+    ).fetchone()
+    assert row == ("old", None, None, 0, 0, 0.0, "quick")
+    migrate.apply(c, SQLITE_DIR)  # rerun is a no-op
+    assert c.execute("select count(*) from schema_version").fetchone() == (2,)
+    idx = {r[1] for r in c.execute("pragma index_list(run)")}
+    assert "run_started" in idx
