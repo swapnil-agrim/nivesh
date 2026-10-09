@@ -2,13 +2,23 @@
 may exist outside the registry (so `nivesh mcp list` and the allow-list stay complete)."""
 
 import importlib
+import json
 import pkgutil
+import re
+from pathlib import Path
+from typing import Any
 
 import fastmcp
+import pytest
+import yaml
 
+import nivesh_adapters
 import nivesh_mcp
-from nivesh_mcp.base import ReadOnlyServer, is_write_name
-from nivesh_mcp.registry import SERVERS
+from nivesh_adapters.base import Adapter
+from nivesh_mcp.base import ReadOnlyServer, RegistrationError, is_write_name, write_methods
+from nivesh_mcp.registry import R3_ALLOWED_SERVERS, SERVERS
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_no_registered_tool_has_a_write_verb() -> None:
@@ -27,3 +37,96 @@ def test_all_server_modules_are_registered_and_read_only() -> None:
             assert not isinstance(obj, fastmcp.FastMCP), f"{mod.name}.{attr}: use ReadOnlyServer"
             if isinstance(obj, ReadOnlyServer):
                 assert id(obj) in registered, f"{mod.name}.{attr} is not in registry.SERVERS"
+
+
+def test_descriptions_have_no_write_language() -> None:
+    for srv in SERVERS.values():
+        for tool in srv.tool_names:
+            assert tool in srv.tool_docs
+
+
+def test_synthetic_write_description_cannot_register() -> None:
+    srv = ReadOnlyServer("x")
+
+    def quote() -> dict[str, Any]:
+        """Places a buy order."""
+        return {}
+
+    with pytest.raises(RegistrationError):
+        srv.tool(quote)
+
+
+def mcp_json_violations(cfg: dict[str, Any]) -> list[str]:
+    allowed = set(SERVERS) | set(R3_ALLOWED_SERVERS)
+    return [n for n in cfg.get("mcpServers", {}) if n not in allowed]
+
+
+def test_mcp_json_servers_are_registered() -> None:
+    assert mcp_json_violations(json.loads((ROOT / ".mcp.json").read_text())) == []
+    assert mcp_json_violations({"mcpServers": {"zerodha_kite": {}}}) == ["zerodha_kite"]
+
+
+def permission_violations(allow: list[str]) -> list[str]:
+    bad = []
+    for entry in allow:
+        m = re.fullmatch(r"mcp__([^_].*?)__(.+)", entry)
+        if not m:
+            bad.append(entry)
+            continue
+        server, tool = m.groups()
+        if server not in SERVERS:
+            bad.append(entry)
+        elif tool != "*" and (tool not in SERVERS[server].tool_names or is_write_name(tool)):
+            bad.append(entry)
+    return bad
+
+
+def test_settings_allow_list_is_registered_read_only_tools() -> None:
+    s = json.loads((ROOT / ".claude" / "settings.json").read_text())
+    assert permission_violations(s["permissions"]["allow"]) == []
+    assert {"Bash", "WebFetch", "WebSearch"} <= set(s["permissions"]["deny"])
+    assert permission_violations(["mcp__zerodha_kite__place_order"]) != []
+    assert permission_violations(["mcp__demo__place_order"]) != []
+    assert permission_violations(["mcp__demo__*"]) == []
+    assert permission_violations(["mcp__other__*"]) != []
+
+
+def test_agent_tool_lists_have_no_write_tools() -> None:
+    for f in (ROOT / ".claude" / "agents").glob("*.md"):
+        meta = yaml.safe_load(f.read_text().split("---\n")[1])
+        tools = [t.strip() for t in str(meta.get("tools", "")).split(",") if t.strip()]
+        mcp = [t for t in tools if t.startswith("mcp__")]
+        assert permission_violations(mcp) == [], f.name
+
+
+class FakeBroker:
+    def get_holdings(self) -> list[str]:
+        return []
+
+    def place_order(self) -> None: ...
+
+    def _private_cancel(self) -> None: ...
+
+
+class InheritedBroker(FakeBroker):
+    pass
+
+
+def test_write_methods_helper() -> None:
+    assert write_methods(FakeBroker) == ["place_order"]
+    assert write_methods(InheritedBroker) == ["place_order"]
+    assert write_methods(type("Ok", (), {"get_holdings": lambda self: []})) == []
+
+
+def test_discovered_adapter_and_client_classes_have_no_write_methods() -> None:
+    # lock-in: only Adapter exists until E2; fails the day a broker class gains a write method
+    found: list[type] = []
+    for mod in pkgutil.iter_modules(nivesh_adapters.__path__):
+        m = importlib.import_module(f"nivesh_adapters.{mod.name}")
+        for obj in vars(m).values():
+            if isinstance(obj, type) and obj.__module__ == m.__name__:
+                if issubclass(obj, Adapter) or obj.__name__.endswith(("Client", "Broker")):
+                    found.append(obj)
+    assert found  # at least the Adapter base itself
+    for cls in found:
+        assert write_methods(cls) == [], cls.__name__

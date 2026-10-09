@@ -67,3 +67,33 @@ def test_literal_secrets_rejected_without_echo(tmp_path: Path, line: str) -> Non
     assert "ref:" in msg  # tells the user the expected format
     for leaked in ("sk-ant-abc123", "hunter2"):
         assert leaked not in msg
+
+
+def test_new_ops_fields_have_defaults_and_validate(tmp_path: Path) -> None:
+    s = load_settings(write(tmp_path, "data_dir: x\n"))
+    assert s.egress_url == "https://api.ipify.org" and s.registered_ip is None
+    assert s.backup.retention_days == 30 and s.backup.target is None and s.usd_inr > 0
+    s = load_settings(
+        write(
+            tmp_path,
+            "prices: {m: {input_usd_per_mtok: 3, output_usd_per_mtok: 15}}\n"
+            "usd_inr: 90\nregistered_ip: 203.0.113.7\n"
+            "backup: {target: /b, recipient: age1abc, retention_days: 7}\n",
+        )
+    )
+    assert s.prices["m"].output_usd_per_mtok == 15 and s.registered_ip == "203.0.113.7"
+    assert s.backup.retention_days == 7
+
+
+@pytest.mark.parametrize(
+    "text, field",
+    [
+        ("prices: {m: {input_usd_per_mtok: -1, output_usd_per_mtok: 1}}\n", "input_usd_per_mtok"),
+        ("usd_inr: 0\n", "usd_inr"),
+        ("registered_ip: not-an-ip\n", "registered_ip"),
+        ("backup: {surprise: 1}\n", "surprise"),
+    ],
+)
+def test_new_ops_fields_rejected_with_field_path(tmp_path: Path, text: str, field: str) -> None:
+    with pytest.raises(ConfigError, match=field):
+        load_settings(write(tmp_path, text))

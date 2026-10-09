@@ -1,9 +1,10 @@
+import ipaddress
 import re
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from nivesh_core.errors import ConfigError
 from nivesh_core.secrets import REF_RE
@@ -35,12 +36,39 @@ class Ttls(BaseModel):
     _parse = field_validator("price", "fundamentals", "nav", "mf_holdings", mode="before")(_ttl)
 
 
+class Price(BaseModel):
+    """USD per million tokens."""
+
+    model_config = ConfigDict(extra="forbid")
+    input_usd_per_mtok: float = Field(ge=0)
+    output_usd_per_mtok: float = Field(ge=0)
+
+
+class BackupSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target: str | None = None  # directory for encrypted archives
+    recipient: str | None = None  # age public key (not a secret)
+    retention_days: int = Field(default=30, gt=0)
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["dev", "prod"] = "dev"
     data_dir: str = "data"
     anthropic_api_key: str | None = None  # a "ref:NAME" reference, never a value
     ttls: Ttls = Ttls()
+    prices: dict[str, Price] = {}
+    usd_inr: float = Field(default=90.0, gt=0)
+    registered_ip: str | None = None
+    egress_url: str = "https://api.ipify.org"
+    backup: BackupSettings = BackupSettings()
+
+    @field_validator("registered_ip")
+    @classmethod
+    def _ip(cls, v: str | None) -> str | None:
+        if v is not None:
+            ipaddress.ip_address(v)
+        return v
 
 
 def _find_literal_secrets(node: Any, trail: str = "") -> list[str]:

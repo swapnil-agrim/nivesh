@@ -124,3 +124,81 @@ def test_duplicate_tool_rejected() -> None:
         def quote() -> dict[str, Any]:
             """Doc."""
             return {}
+
+
+async def test_tool_output_is_redacted_but_provenance_untouched() -> None:
+    from nivesh_core.pii_scan import scan_text
+    from tests import pii_values as pv
+
+    s = ReadOnlyServer("demo")
+
+    @s.tool
+    def leaky() -> AdapterResult:
+        """Return PII-laden data."""
+        return AdapterResult(
+            data={
+                "note": f"call {pv.phone()} or {pv.email()}",
+                "rows": [{"text": pv.pan()}, pv.folio()],
+                "price": 12.5,
+            },
+            source="t",
+            as_of=NOW,
+            fetched_at=NOW,
+        )
+
+    async with Client(s.mcp) as c:
+        res = await c.call_tool("leaky", {})
+    text = res.content[0].text  # type: ignore[union-attr]
+    assert scan_text(text) == []
+    env = json.loads(text)
+    assert env["source"] == "t" and env["as_of"] == NOW.isoformat() and env["stale"] is False
+    assert env["data"]["price"] == 12.5
+
+
+@pytest.mark.parametrize("name", ["withdraw_funds", "Withdraw", "withdrawal_history"])
+def test_withdraw_is_a_write_name(name: str) -> None:
+    assert is_write_name(name)
+
+
+def test_write_language_in_description_rejected() -> None:
+    s = ReadOnlyServer("demo")
+
+    def fn() -> dict[str, Any]:
+        """Places a buy order."""
+        return {}
+
+    with pytest.raises(RegistrationError, match="description"):
+        s.tool(fn)
+    assert s.tool_names == [] and "fn" not in s.tool_docs
+
+
+@pytest.mark.parametrize(
+    "doc",
+    ["Ranks the seller list.", "Ordering of holdings.", "Reorder levels and borders.", "Ping."],
+)
+def test_benign_descriptions_pass(doc: str) -> None:
+    s = ReadOnlyServer("demo")
+
+    def fn() -> dict[str, Any]:
+        return {}
+
+    fn.__doc__ = doc
+    s.tool(fn)
+    assert s.tool_docs["fn"] == doc
+
+
+async def test_provenance_fields_are_still_redacted() -> None:
+    from tests import pii_values as pv
+
+    s = ReadOnlyServer("demo")
+
+    @s.tool
+    def ping() -> AdapterResult:
+        """Return data."""
+        return AdapterResult(data=1, source="call " + pv.phone() + ".", as_of=NOW, fetched_at=NOW)
+
+    async with Client(s.mcp) as c:
+        res = await c.call_tool("ping", {})
+    env = json.loads(res.content[0].text)  # type: ignore[union-attr]
+    assert pv.phone() not in res.content[0].text  # type: ignore[union-attr]
+    assert env["as_of"] == NOW.isoformat() and env["stale"] is False

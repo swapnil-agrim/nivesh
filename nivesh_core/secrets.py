@@ -5,7 +5,7 @@ import re
 
 import keyring
 
-from nivesh_core.errors import ConfigError, SecretNotFound
+from nivesh_core.errors import ConfigError, NiveshError, SecretNotFound
 
 SERVICE = "nivesh"
 REF_RE = re.compile(r"^ref:([A-Z][A-Z0-9_]{0,63})$")
@@ -22,6 +22,28 @@ def get_secret(name: str) -> str:
     if value:
         return value
     raise SecretNotFound(f"secret {name!r} not found in environment or OS keychain")
+
+
+def set_secret(name: str, value: str) -> None:
+    """Store `value` in the OS keychain. Never falls back to a file."""
+    if not REF_RE.match(f"ref:{name}"):
+        raise NiveshError("secret name must be UPPER_SNAKE_CASE")
+    if not value:
+        raise NiveshError("empty secret value")
+    try:
+        keyring.set_password(SERVICE, name, value)
+    except Exception:  # noqa: BLE001 - message omitted on purpose; it could echo the value
+        raise NiveshError(
+            "no usable OS keychain here; inject the secret as an environment variable instead"
+        ) from None
+
+
+def secret_exists(name: str) -> bool:
+    try:
+        get_secret(name)
+    except SecretNotFound:
+        return False
+    return True
 
 
 class SecretRef:

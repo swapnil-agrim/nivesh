@@ -153,3 +153,169 @@ def test_cli_run_unknown_command_exits_nonzero() -> None:
 @pytest.mark.live
 async def test_live_sdk_smoke() -> None:
     assert "pong" in (await run_command("ping", [], mode="prod")).lower()
+
+
+# --- ST-13.3 / 13.4: tracing, run rows, budget gate ---------------------------------------------
+import sqlite3  # noqa: E402
+
+from claude_agent_sdk import (  # noqa: E402
+    AssistantMessage,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    UserMessage,
+)
+
+from nivesh_core.pii_scan import scan_paths  # noqa: E402
+from nivesh_core.timeutil import to_iso  # noqa: E402
+from nivesh_core.trace import Tracer, read_trace  # noqa: E402
+from tests import pii_values as pv  # noqa: E402
+
+
+def full_run(text: str = "pong") -> list[Any]:
+    return [
+        AssistantMessage(
+            content=[
+                TextBlock(text="calling " + pv.email()),
+                ToolUseBlock("tu1", "mcp__demo__ping", {"a": 1}),
+            ],
+            model="claude-test",
+        ),
+        UserMessage(content=[ToolResultBlock(tool_use_id="tu1", content=pv.pan(), is_error=False)]),
+        ResultMessage(
+            subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
+            session_id="s", result=text, total_cost_usd=0.01,
+            usage={"input_tokens": 100, "output_tokens": 20},
+        ),
+    ]  # fmt: skip
+
+
+async def test_run_command_traces_all_record_types(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runtime, "query", fake_query(*full_run()))
+    tracer = Tracer(tmp_path, 1)
+    assert await run_command("ping", [], mode="prod", tracer=tracer) == "pong"
+    recs = read_trace(tmp_path / "trace.jsonl")
+    assert [r["type"] for r in recs] == [
+        "start", "assistant_text", "tool_call", "tool_result", "result",
+    ]  # fmt: skip
+    assert recs[0]["prompt_version"] == tracer.prompt_ver and len(tracer.prompt_ver or "") == 12
+    assert recs[-1]["model"] == "claude-test" and recs[-1]["input_tokens"] == 100
+    assert recs[-1]["cost_source"] == "sdk" and recs[-1]["cost_inr"] > 0
+    assert scan_paths([tmp_path]) == []
+
+
+def cfg_dir(tmp_path: Path, *, cap: int = 2000) -> list[str]:
+    d = tmp_path / "cfg"
+    d.mkdir(exist_ok=True)
+    (d / "nivesh.yaml").write_text(
+        (ROOT / "config" / "nivesh.yaml").read_text().replace("data_dir: data", "data_dir: dd")
+    )
+    (d / "profile.yaml").write_text(
+        (ROOT / "config" / "profile.yaml")
+        .read_text()
+        .replace("monthly_cost_cap: 2000", f"monthly_cost_cap: {cap}")
+    )
+    return ["--config-dir", str(d)]
+
+
+def rows(tmp_path: Path) -> list[tuple[Any, ...]]:
+    c = sqlite3.connect(tmp_path / "dd" / "nivesh.sqlite")
+    try:
+        return c.execute(
+            "select status, tier, model, input_tokens, cost_inr, run_dir from run order by id"
+        ).fetchall()
+    finally:
+        c.close()
+
+
+def test_cli_run_records_row_and_trace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runtime, "query", fake_query(*full_run()))
+    r = CliRunner().invoke(app, [*cfg_dir(tmp_path), "run", "ping"])
+    assert r.exit_code == 0, r.output
+    ((status, tier, model, tok, cost, rdir),) = rows(tmp_path)
+    assert (status, tier, model, tok, rdir) == ("ok", "quick", "claude-test", 100, "runs/1")
+    assert cost > 0
+    assert (tmp_path / "dd" / "runs" / "1" / "trace.jsonl").is_file()
+
+
+def test_cli_run_error_row_and_redacted_trace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runtime, "query", fake_query(raises=RuntimeError("bad " + pv.bearer())))
+    r = CliRunner().invoke(app, [*cfg_dir(tmp_path), "run", "ping"])
+    assert r.exit_code == 1
+    assert rows(tmp_path)[0][0] == "error"
+    recs = read_trace(tmp_path / "dd" / "runs" / "1" / "trace.jsonl")
+    assert recs[-1]["type"] == "error" and "abc.def123" not in recs[-1]["message"]
+
+
+def seed_spend(tmp_path: Path, inr: float) -> None:
+    from nivesh_core.db import init_stores
+    from nivesh_core.timeutil import utcnow
+
+    init_stores(tmp_path / "dd")
+    c = sqlite3.connect(tmp_path / "dd" / "nivesh.sqlite")
+    c.execute(
+        "insert into run (command, started_at, status, cost_inr) values ('x', ?, 'ok', ?)",
+        (to_iso(utcnow()), inr),
+    )
+    c.commit()
+    c.close()
+
+
+def test_deep_at_85_percent_downgrades_and_force_keeps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = cfg_dir(tmp_path, cap=1000)
+    seed_spend(tmp_path, 850)
+    monkeypatch.setattr(runtime, "query", fake_query(*full_run()))
+    r = CliRunner().invoke(app, [*cfg, "run", "ping", "--tier", "deep"])
+    assert r.exit_code == 0 and "downgraded" in r.output  # stderr is mixed into output
+    r = CliRunner().invoke(app, [*cfg, "run", "ping", "--tier", "deep", "--force"])
+    assert r.exit_code == 0
+    assert [x[1] for x in rows(tmp_path)][1:] == ["quick", "deep"]
+
+
+def test_deep_at_100_percent_refused_before_any_sdk_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = cfg_dir(tmp_path, cap=1000)
+    seed_spend(tmp_path, 1000)
+    q = fake_query(*full_run())
+    monkeypatch.setattr(runtime, "query", q)
+    for extra in ([], ["--force"]):
+        r = CliRunner().invoke(app, [*cfg, "run", "ping", "--tier", "deep", *extra])
+        assert r.exit_code == 1 and "refused" in r.output
+    assert q.seen == {} and len(rows(tmp_path)) == 1  # no SDK call, no run row
+    assert CliRunner().invoke(app, [*cfg, "run", "ping", "--tier", "quick"]).exit_code == 0
+
+
+def test_bad_tier_rejected(tmp_path: Path) -> None:
+    r = CliRunner().invoke(app, [*cfg_dir(tmp_path), "run", "ping", "--tier", "huge"])
+    assert r.exit_code == 2
+
+
+def test_status_prints_mtd_and_cap(tmp_path: Path) -> None:
+    cfg = cfg_dir(tmp_path, cap=1000)
+    seed_spend(tmp_path, 850)
+    r = CliRunner().invoke(app, [*cfg, "status"])
+    assert r.exit_code == 0, r.output
+    assert "850.00" in r.output and "1000.00" in r.output and "85%" in r.output
+    assert "downgraded" in r.output
+
+
+async def test_failed_run_still_records_usage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bad = ResultMessage(
+        subtype="error", duration_ms=1, duration_api_ms=1, is_error=True, num_turns=1,
+        session_id="s", result="boom", total_cost_usd=0.01,
+        usage={"input_tokens": 100, "output_tokens": 20},
+    )  # fmt: skip
+    monkeypatch.setattr(runtime, "query", fake_query(bad))
+    tracer = Tracer(tmp_path, 1)
+    with pytest.raises(AgentRunError):
+        await run_command("ping", [], mode="prod", tracer=tracer)
+    assert tracer.summary["input_tokens"] == 100 and tracer.summary["cost_inr"] > 0

@@ -42,3 +42,20 @@ def ensure_data_dir(path: Path) -> Path:
     with private_umask():
         (path / MARKER).touch()
     return path
+
+
+def write_private(path: Path, data: str | bytes, *, append: bool = False) -> None:
+    """0600-from-birth write; refuses symlinks, and existing files unless appending."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW
+    flags |= os.O_APPEND if append else os.O_EXCL
+    fd = os.open(path, flags, 0o600)
+    with os.fdopen(fd, "ab") as f:
+        f.write(data.encode() if isinstance(data, str) else data)
+
+
+def run_dir(data_dir: Path, run_id: int) -> Path:
+    """`<data_dir>/runs/<run_id>`, owner-only (ST-1.7 gap)."""
+    d = data_dir / "runs" / str(run_id)
+    with private_umask():
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return d

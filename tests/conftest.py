@@ -2,7 +2,9 @@ import socket
 from collections.abc import Iterator
 from typing import Any
 
+import keyring
 import pytest
+from keyring.backend import KeyringBackend
 
 
 @pytest.fixture(autouse=True)
@@ -26,3 +28,30 @@ def _no_network_and_replay_mode(
     monkeypatch.delenv("NIVESH_RECORD", raising=False)
     monkeypatch.delenv("NIVESH_REFRESH", raising=False)
     yield
+
+
+class MemoryKeyring(KeyringBackend):
+    priority = 1  # type: ignore[assignment]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.store: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return self.store.get((service, username))
+
+    def set_password(self, service: str, username: str, pw: str) -> None:
+        self.store[(service, username)] = pw
+
+    def delete_password(self, service: str, username: str) -> None:
+        self.store.pop((service, username), None)
+
+
+@pytest.fixture
+def fake_keyring() -> Iterator[MemoryKeyring]:
+    """In-memory keychain; the real OS keychain is never touched."""
+    old = keyring.get_keyring()
+    backend = MemoryKeyring()
+    keyring.set_keyring(backend)
+    yield backend
+    keyring.set_keyring(old)

@@ -14,8 +14,19 @@ from fastmcp import FastMCP
 
 from nivesh_adapters.base import AdapterResult
 from nivesh_core.errors import NiveshError
+from nivesh_core.redact import redact_json, redact_text
 
-WRITE_VERBS = ("place", "modify", "cancel", "transfer", "order", "buy", "sell", "delete")
+WRITE_VERBS = (
+    "place",
+    "modify",
+    "cancel",
+    "transfer",
+    "order",
+    "buy",
+    "sell",
+    "delete",
+    "withdraw",
+)
 _SUFFIXES = {
     "",
     "s",
@@ -41,7 +52,9 @@ _SUFFIXES = {
     "ication",
     "ifying",
     "ying",
-}  # inflections: placing, transferred, deletion, cancellation, modified, placement
+    "al",
+    "als",
+}  # inflections: placing, transferred, deletion, cancellation, modified, placement, withdrawal
 
 
 class RegistrationError(NiveshError):
@@ -58,6 +71,26 @@ def is_write_name(name: str) -> bool:
         for v in WRITE_VERBS
         if p.startswith(stems[v])
     )
+
+
+_DESC_ENDINGS = ("", "s", "es", "d", "ed", "led", "red", "ied", "ies", "al", "als")
+
+
+def write_methods(cls: type) -> list[str]:
+    """Public methods (inherited included) whose names are writes; broker classes must have none."""
+    return [
+        n
+        for n in dir(cls)
+        if not n.startswith("_") and callable(getattr(cls, n)) and is_write_name(n)
+    ]
+
+
+def _desc_write_words(doc: str) -> list[str]:
+    """Whole words that are an inflected write verb ("places"); not "seller" or "ordering"."""
+    forms = {v + e for v in WRITE_VERBS for e in _DESC_ENDINGS} | {
+        v[:-1] + e for v in WRITE_VERBS if v[-1] in "ey" for e in _DESC_ENDINGS
+    }
+    return [w for w in re.findall(r"[A-Za-z]+", doc) if w.lower() in forms]
 
 
 def _envelope(result: Any, tool: str) -> dict[str, Any]:
@@ -80,6 +113,7 @@ class ReadOnlyServer:
         self.name = name
         self.mcp = FastMCP(name)
         self.tool_names: list[str] = []
+        self.tool_docs: dict[str, str] = {}
 
     def tool(self, fn: Callable[..., Any]) -> Callable[..., Any]:
         name = fn.__name__
@@ -89,6 +123,9 @@ class ReadOnlyServer:
             raise RegistrationError(f"tool {name!r} must be a sync function")
         if not (fn.__doc__ and fn.__doc__.strip()):
             raise RegistrationError(f"tool {name!r} needs a docstring")
+        bad = _desc_write_words(fn.__doc__)
+        if bad:
+            raise RegistrationError(f"tool {name!r} description uses write language: {bad}")
         sig = inspect.signature(fn)
         missing = [
             p.name for p in sig.parameters.values() if p.annotation is inspect.Parameter.empty
@@ -102,10 +139,23 @@ class ReadOnlyServer:
 
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
-            return _envelope(fn(*args, **kwargs), name)
+            env = _envelope(fn(*args, **kwargs), name)
+
+            # NFR-3: every tool output is redacted; provenance fields are left alone.
+            # ponytail: key-name masking is blunt (`key`/`account` parts); avoid such field names.
+            def clean(k: str, v: Any) -> Any:
+                plain = isinstance(v, bool) or (
+                    isinstance(v, str) and len(v) < 64 and redact_text(v) == v
+                )
+                if k in {"as_of", "source", "stale"} and plain:
+                    return v
+                return redact_json(v)
+
+            return {k: clean(k, v) for k, v in env.items()}
 
         wrapper.__signature__ = sig.replace(return_annotation=dict[str, Any])  # type: ignore[attr-defined]
         wrapper.__annotations__ = {**fn.__annotations__, "return": dict[str, Any]}
         self.mcp.tool(wrapper)
         self.tool_names.append(name)
+        self.tool_docs[name] = inspect.cleandoc(fn.__doc__)
         return fn
