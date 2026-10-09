@@ -1,0 +1,10 @@
+# Sample investor profile. No secrets and no real holdings belong here.
+risk_tolerance: moderate
+horizon_split: {short: 20, medium: 30, long: 50}
+target_allocation: {equity: 60, debt: 30, gold: 10}
+max_position_pct: 10
+max_sector_pct: 30
+exclusions: []
+tax_rates: {stcg: 20, ltcg: 12.5}
+base_currency: INR
+monthly_cost_cap: 2000

@@ -1,0 +1,5 @@
+# Secrets are referenced by name only ("ref:NAME"); values come from env or the OS keychain.
+mode: dev
+data_dir: data
+# Optional: set the Anthropic credential reference here (a ref: name, never a value).
+ttls: {price: 1d, fundamentals: 7d, nav: 1d, mf_holdings: 31d}

@@ -1,0 +1,37 @@
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  ci:
+    name: ci
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+      - name: Install
+        run: uv sync --frozen
+      - name: Lint, types, tests with coverage gate (>=85% engine+adapters)
+        run: make check
+      - name: Tool-safety test
+        run: uv run pytest tests/safety -q
+      - name: Dependency audit
+        run: uv run pip-audit
+      - name: Secret scan (gitleaks binary)
+        run: |
+          case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64) asset=linux_x64 ;;
+            Darwin-arm64) asset=darwin_arm64 ;;
+            Darwin-x86_64) asset=darwin_x64 ;;
+            *) echo "unsupported platform"; exit 1 ;;
+          esac
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_${asset}.tar.gz" | tar -xz gitleaks
+          ./gitleaks detect --source . --redact --verbose

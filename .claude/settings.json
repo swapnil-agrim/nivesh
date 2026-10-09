@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": ["mcp__demo__ping"],
+    "deny": ["Bash", "WebFetch", "WebSearch", "Write", "Edit", "NotebookEdit"]
+  },
+  "enabledMcpjsonServers": ["demo"]
+}

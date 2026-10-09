@@ -1,0 +1,24 @@
+# Sigma runtime dirs (machine-written)
+.sdlc/state/
+.sdlc/ledger/
+.sdlc/work/
+.sdlc/knowledge/
+.sdlc/events/
+graphify-out/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+/data/
+*.duckdb
+*.sqlite
+*.sqlite-*
+.env
+.claude/settings.local.json
+tests/fixtures/**/*.tmp

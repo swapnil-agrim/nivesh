@@ -1,0 +1,32 @@
+name: nightly
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - name: Benchmarks, eval suite, dependency audit
+        # pytest exit 5 = no tests collected; benchmarks/evals are stubs until later epics.
+        shell: bash
+        run: |
+          {
+            echo "# Nightly report"
+            echo "## Benchmarks"
+            uv run pytest -m bench -o addopts="" --no-header -q || [ $? -eq 5 ]
+            echo "## Agent eval"
+            uv run pytest -m eval -o addopts="" --no-header -q || [ $? -eq 5 ]
+            echo "## Dependency audit (weekly SBOM deferred)"
+            uv run pip-audit
+          } 2>&1 | tee report.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-report
+          path: report.md

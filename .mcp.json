@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "demo": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "python", "-m", "nivesh_mcp", "demo"]
+    }
+  }
+}
