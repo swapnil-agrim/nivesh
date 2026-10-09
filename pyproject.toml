@@ -1,0 +1,69 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nivesh"
+version = "0.1.0"
+description = "Nivesh: agentic investment research agent (India + US), read-only"
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+dependencies = [
+  "fastmcp==4.1.0",
+  "claude-agent-sdk==0.2.165",
+  "pydantic==2.14.0",
+  "pyyaml==6.0.3",
+  "keyring==25.7.0",
+  "duckdb==1.5.6",
+  "typer==0.27.3",
+  "httpx==0.28.1",
+]
+
+[project.scripts]
+nivesh = "nivesh_cli.main:app"
+
+[dependency-groups]
+dev = [
+  "ruff==0.16.10",
+  "mypy==2.4.0",
+  "pytest==9.1.1",
+  "pytest-cov==7.1.0",
+  "pytest-asyncio==1.4.0",
+  "pip-audit==2.10.1",
+  "types-PyYAML==6.0.12.20260906",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["nivesh_core", "nivesh_engine", "nivesh_adapters", "nivesh_mcp", "nivesh_agents", "nivesh_cli"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S103", "S105", "S106", "S108"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["nivesh_core", "nivesh_engine", "nivesh_adapters", "nivesh_mcp", "nivesh_agents", "nivesh_cli"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "bench: performance benchmarks (nightly)",
+  "eval: agent eval suite (nightly)",
+  "live: hits real network or SDK; skipped in CI",
+]
+addopts = "-m 'not live and not bench and not eval'"
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+# nivesh_engine is empty until E6, so its coverage is vacuous for now (README).
+show_missing = true
