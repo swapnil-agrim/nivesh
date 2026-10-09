@@ -4,6 +4,11 @@
       "type": "stdio",
       "command": "uv",
       "args": ["run", "python", "-m", "nivesh_mcp", "demo"]
+    },
+    "holdings": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "python", "-m", "nivesh_mcp", "holdings"]
     }
   }
 }

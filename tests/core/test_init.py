@@ -8,7 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from nivesh_cli.main import app
-from nivesh_core.db import init_stores
+from nivesh_core.db import MIGRATIONS, init_stores, migrate
 from nivesh_core.errors import ConfigError
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,7 +28,8 @@ def test_init_creates_private_stores(tmp_path: Path) -> None:
     for name in ("nivesh.sqlite", "nivesh.duckdb"):
         assert mode(d / name) == 0o600
     s = sqlite3.connect(d / "nivesh.sqlite")
-    assert s.execute("select max(version) from schema_version").fetchone() == (2,)
+    latest = migrate.latest_version(MIGRATIONS / "sqlite")
+    assert s.execute("select max(version) from schema_version").fetchone() == (latest,)
     s.close()
     with duckdb.connect(str(d / "nivesh.duckdb")) as k:
         assert k.execute("select max(version) from schema_version").fetchone() == (1,)

@@ -1,0 +1,11 @@
+{
+  "status": "success",
+  "data": {
+    "net": [
+      {"security_id": "RELI", "isin": "INE000A01010", "exchange": "NSE", "quantity": "15",
+       "average_price": "2,500.00", "last_price": "2,510.00"},
+      {"security_id": "CLOSEONLY", "isin": "INE222B01012", "exchange": "NSE", "quantity": "-5",
+       "average_price": "1,210.00", "last_price": "1,200.00"}
+    ]
+  }
+}

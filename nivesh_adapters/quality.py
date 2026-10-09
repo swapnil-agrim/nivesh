@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -15,7 +16,7 @@ class DataQualityError(NiveshError):
         super().__init__(f"{adapter}: bad {field} ({reason}); value={value!r}")
 
 
-def check_non_negative(adapter: str, field: str, value: float) -> None:
+def check_non_negative(adapter: str, field: str, value: float | Decimal) -> None:
     if value < 0:
         raise DataQualityError(adapter, field, value, "must be >= 0")
 
@@ -36,3 +37,15 @@ def check_schema(adapter: str, model: type[M], data: Any) -> M:
         err = e.errors()[0]
         field = ".".join(str(x) for x in err["loc"]) or "<root>"
         raise DataQualityError(adapter, field, err.get("input"), err["msg"]) from e
+
+
+def parse_decimal(adapter: str, field: str, value: Any) -> Decimal:
+    """Decimal from text such as "1,23,456.50" (thousands separators stripped); else DataQuality."""
+    text = str(value).replace(",", "").strip()
+    try:
+        d = Decimal(text)
+    except InvalidOperation:
+        raise DataQualityError(adapter, field, value, "not a number") from None
+    if not d.is_finite():
+        raise DataQualityError(adapter, field, value, "not a finite number")
+    return d

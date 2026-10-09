@@ -1,0 +1,7 @@
+account_label,isin,symbol,exchange,quantity,avg_cost,currency,asset_class
+Other Broker,INE000A01010,,,"1,234","2,450.50",INR,equity
+Other Broker,INE111A01011,,,10,95.25,,
+Other Broker,,SYMONLY,BSE,5,10,INR,etf
+Retirement,,NPS-SAMPLE,,50,12.5,INR,nps
+Bank deposits,,FD-SAMPLE,,100000,,INR,fd
+Other Broker,INE222B01012,,,0,5,INR,equity

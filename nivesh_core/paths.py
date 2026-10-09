@@ -53,6 +53,16 @@ def write_private(path: Path, data: str | bytes, *, append: bool = False) -> Non
         f.write(data.encode() if isinstance(data, str) else data)
 
 
+def replace_private(path: Path, data: str | bytes) -> None:
+    """Atomically replace `path` with a 0600 file (daily token rotation); refuses a symlink."""
+    if path.is_symlink():
+        raise ConfigError(f"{path}: is a symlink; refusing to replace")
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.unlink(missing_ok=True)
+    write_private(tmp, data)
+    os.replace(tmp, path)
+
+
 def run_dir(data_dir: Path, run_id: int) -> Path:
     """`<data_dir>/runs/<run_id>`, owner-only (ST-1.7 gap)."""
     d = data_dir / "runs" / str(run_id)

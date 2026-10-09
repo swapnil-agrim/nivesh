@@ -1,7 +1,16 @@
 {
   "permissions": {
-    "allow": ["mcp__demo__ping"],
+    "allow": [
+      "mcp__demo__ping",
+      "mcp__holdings__session_status",
+      "mcp__holdings__get_holdings",
+      "mcp__holdings__get_positions",
+      "mcp__holdings__get_funds",
+      "mcp__holdings__combined_portfolio",
+      "mcp__holdings__get_transactions",
+      "mcp__holdings__read_cas_statement"
+    ],
     "deny": ["Bash", "WebFetch", "WebSearch", "Write", "Edit", "NotebookEdit"]
   },
-  "enabledMcpjsonServers": ["demo"]
+  "enabledMcpjsonServers": ["demo", "holdings"]
 }

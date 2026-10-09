@@ -28,11 +28,13 @@ A root-owned mount fails with a permission error; this is the fix.
 
 ## Register the IP with HDFC
 Manual, not verified by tests: register the VM's static IP in the HDFC Securities API portal
-(IP whitelisting) before first use. Steps are the broker's and may change.
+(IP whitelisting) before first use. Steps are the broker's and may change. The full registration
+steps and the mismatch symptoms are in `docs/runbooks/investright.md`.
 
 ## Daily login via SSH tunnel
-Manual, not verified by tests: the broker login callback lands on localhost. Forward it with
-`ssh -L 8080:localhost:8080 <vm>` and complete the login in your local browser each day.
+Manual, not verified by tests: the broker login callback lands on localhost port 8765. Forward it with
+`ssh -L 8765:localhost:8765 <vm>` and complete the login in your local browser each day (or use
+`nivesh login --paste`). See `docs/runbooks/investright.md`.
 
 ## Egress check
 Set `registered_ip` in `config/nivesh.yaml`, then run `docker compose run --rm nivesh egress-check`.

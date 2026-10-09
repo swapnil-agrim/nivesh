@@ -51,6 +51,32 @@ class BackupSettings(BaseModel):
     retention_days: int = Field(default=30, gt=0)
 
 
+class InvestRightSettings(BaseModel):
+    """HDFC InvestRight API app. The base URL is per spec, unverified against the live API."""
+
+    model_config = ConfigDict(extra="forbid")
+    base_url: str = "https://developer.hdfcsec.com"
+    redirect_port: int = Field(default=8765, ge=1024, le=65535)
+    app_key: str = "ref:INVESTRIGHT_API_KEY"
+    api_secret: str = "ref:INVESTRIGHT_API_SECRET"  # noqa: S105 - a reference, not a value
+    user_agent: str = "nivesh/0.1"
+    demat_ref: str | None = None  # holder_ref (from `nivesh ingest`) of the InvestRight demat
+
+    @field_validator("base_url")
+    @classmethod
+    def _https(cls, v: str) -> str:
+        if not v.startswith("https://"):
+            raise ValueError("must start with https://")
+        return v.rstrip("/")
+
+    @field_validator("app_key", "api_secret")
+    @classmethod
+    def _ref(cls, v: str) -> str:
+        if not REF_RE.match(v):
+            raise ValueError("must be a reference such as 'ref:NAME'")
+        return v
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["dev", "prod"] = "dev"
@@ -62,6 +88,7 @@ class Settings(BaseModel):
     registered_ip: str | None = None
     egress_url: str = "https://api.ipify.org"
     backup: BackupSettings = BackupSettings()
+    investright: InvestRightSettings = InvestRightSettings()
 
     @field_validator("registered_ip")
     @classmethod

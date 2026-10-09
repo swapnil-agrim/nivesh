@@ -97,3 +97,27 @@ def test_new_ops_fields_have_defaults_and_validate(tmp_path: Path) -> None:
 def test_new_ops_fields_rejected_with_field_path(tmp_path: Path, text: str, field: str) -> None:
     with pytest.raises(ConfigError, match=field):
         load_settings(write(tmp_path, text))
+
+
+def test_investright_block_defaults(tmp_path: Path) -> None:
+    ir = load_settings(write(tmp_path, "data_dir: x\n")).investright
+    assert ir.redirect_port == 8765 and ir.base_url.startswith("https://")
+    assert ir.app_key == "ref:INVESTRIGHT_API_KEY" and ir.api_secret == "ref:INVESTRIGHT_API_SECRET"
+    assert ir.demat_ref is None
+    assert load_settings(ROOT / "config" / "nivesh.yaml").investright.redirect_port == 8765
+
+
+def test_investright_literal_api_secret_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="ref:"):
+        load_settings(write(tmp_path, "investright: {api_secret: plain}\n"))
+
+
+def test_investright_base_url_must_be_https(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="base_url"):
+        load_settings(write(tmp_path, "investright: {base_url: http://example.test}\n"))
+
+
+@pytest.mark.parametrize("port", [80, 70000])
+def test_investright_redirect_port_range(tmp_path: Path, port: int) -> None:
+    with pytest.raises(ConfigError, match="redirect_port"):
+        load_settings(write(tmp_path, f"investright: {{redirect_port: {port}}}\n"))

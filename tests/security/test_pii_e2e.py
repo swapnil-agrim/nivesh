@@ -66,3 +66,47 @@ async def test_no_pii_in_tool_output_fixtures_or_errors(
     tr.error(raw)
 
     assert scan_paths([out, fx]) == []
+
+
+def test_cas_pipeline_leaves_no_pii_anywhere(
+    cli_env: tuple[list[str], Path], fake_keyring: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import keyring
+    from typer.testing import CliRunner
+
+    from nivesh_adapters import cas
+    from nivesh_cli.main import app
+    from nivesh_core.db import init_stores
+    from nivesh_core.db.sqlite import open_sqlite
+    from tests.cas_models import demat_data, pii_strings, rta_data
+
+    args, data = cli_env
+    raw = demat_data().model_dump_json() + rta_data().model_dump_json()
+    assert scan_text(raw), "control: the raw models contain PII"
+
+    keyring.set_password("nivesh", "CAS_PASSWORD", pv.cas_password())
+    keyring.set_password("nivesh", "FOLIO_SALT", pv.salt())
+    models = {b"demat": demat_data(), b"rta": rta_data(parse_warnings=["warn " + pv.email()])}
+    monkeypatch.setattr(cas, "_read", lambda p, pw: models[p.read_bytes()])
+    init_stores(data)
+    (data / "inbox").mkdir()
+    (data / "inbox" / "a.pdf").write_bytes(b"demat")
+    (data / "inbox" / "b.pdf").write_bytes(b"rta")
+
+    r = CliRunner().invoke(app, [*args, "ingest"])
+    assert r.exit_code == 0, r.output
+
+    conn = open_sqlite(data / "nivesh.sqlite")
+    dump = "\n".join(conn.iterdump())
+    reports = " ".join(row[0] for row in conn.execute("select report from ingest"))
+    conn.close()
+    files = "\n".join(
+        p.read_text()
+        for p in data.rglob("*")
+        if p.is_file() and p.suffix in {".json", ".jsonl", ".txt"}
+    )
+    for label, text in {"db": dump, "report": reports, "cli": r.output, "files": files}.items():
+        assert scan_text(text) == [], label
+        for pii in pii_strings():
+            assert pii not in text, label
+    assert scan_paths([data / "inbox"]) == []

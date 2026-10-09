@@ -118,8 +118,7 @@ def test_write_methods_helper() -> None:
     assert write_methods(type("Ok", (), {"get_holdings": lambda self: []})) == []
 
 
-def test_discovered_adapter_and_client_classes_have_no_write_methods() -> None:
-    # lock-in: only Adapter exists until E2; fails the day a broker class gains a write method
+def discover_adapter_classes() -> list[type]:
     found: list[type] = []
     for mod in pkgutil.iter_modules(nivesh_adapters.__path__):
         m = importlib.import_module(f"nivesh_adapters.{mod.name}")
@@ -127,6 +126,32 @@ def test_discovered_adapter_and_client_classes_have_no_write_methods() -> None:
             if isinstance(obj, type) and obj.__module__ == m.__name__:
                 if issubclass(obj, Adapter) or obj.__name__.endswith(("Client", "Broker")):
                     found.append(obj)
+    return found
+
+
+def test_discovered_adapter_and_client_classes_have_no_write_methods() -> None:
+    found = discover_adapter_classes()
     assert found  # at least the Adapter base itself
     for cls in found:
         assert write_methods(cls) == [], cls.__name__
+
+
+def test_investright_client_has_no_write_methods() -> None:
+    from nivesh_adapters.investright import InvestRightClient
+
+    assert write_methods(InvestRightClient) == []
+
+
+def test_safety_discovery_finds_investright_client() -> None:
+    # a module move must not silently drop the broker client from the NFR-1 check
+    assert "InvestRightClient" in {c.__name__ for c in discover_adapter_classes()}
+
+
+def test_holdings_server_has_no_write_tool_and_no_write_words_in_descriptions() -> None:
+    from nivesh_mcp.base import _desc_write_words
+
+    srv = SERVERS["holdings"]
+    assert len(srv.tool_names) == 7
+    for tool in srv.tool_names:
+        assert not is_write_name(tool), tool
+        assert _desc_write_words(srv.tool_docs[tool]) == [], tool

@@ -4,21 +4,21 @@ Agentic investment research agent (India + US), read-only. (Repository formerly 
 
 ## Architecture
 - `nivesh_core`: typed config and profile, secrets, SQLite and DuckDB stores, migrations.
-- `nivesh_engine`: deterministic analytics (empty until E6).
-- `nivesh_adapters`: data-source adapters, quality validators, record/replay fixtures, TTL cache.
-- `nivesh_mcp`: read-only FastMCP server framework and server registry.
+- `nivesh_engine`: deterministic analytics; so far holdings consolidation and reconciliation (`consolidate.py`). Valuation and risk engines arrive with E6.
+- `nivesh_adapters`: data-source adapters (read-only InvestRight client and daily login, CAS parser boundary on `casparser`, CSV import), quality validators, record/replay fixtures, TTL cache.
+- `nivesh_mcp`: read-only FastMCP server framework and server registry (`demo`, `holdings`).
 - `nivesh_agents`: headless Agent SDK runtime (same agents as the Claude Code `.claude/` config).
-- `nivesh_cli`: the `nivesh` command (`init`, `mcp list`, `run`, `status`, `replay`, `secrets`, `pii-scan`, `egress-check`, `backup`, `restore`).
+- `nivesh_cli`: the `nivesh` command (`init`, `mcp list`, `run`, `status`, `replay`, `secrets`, `pii-scan`, `egress-check`, `backup`, `restore`, `login`, `sync`, `ingest`, `import-csv`).
 
-Supporting dirs: `config/`, `schemas/`, `prompts/`, `docs/adr/`, `tests/fixtures/`, `.claude/`.
+Supporting dirs: `config/`, `schemas/`, `prompts/`, `templates/` (CSV template), `docs/adr/`, `docs/runbooks/`, `tests/fixtures/`, `.claude/`.
 
 ## Setup
 ```
 make setup   # uv sync (creates .venv with Python 3.12)
 make check   # ruff, mypy, pytest with coverage gate
 ```
-`make check` is also exactly what CI runs. The coverage gate (85%) covers `nivesh_engine` and
-`nivesh_adapters`; engine coverage is vacuous until engine code exists (E6).
+`make check` is also exactly what CI runs. The coverage gate (85% branch) covers `nivesh_engine` and
+`nivesh_adapters`.
 
 ## CI and merge blocking
 CI (`.github/workflows/ci.yml`) must pass before merge. Branch protection requiring the `ci`
@@ -32,20 +32,31 @@ a manual decision.
 - Egress: `nivesh egress-check` compares the public IP with `registered_ip`; `run` warns but proceeds.
 - Backups: `nivesh backup` / `nivesh restore` (age-encrypted); host cron line in `docs/deploy/vm.md`.
 - Injection: adapters and agents must pass all external text through `nivesh_agents.untrusted.wrap_untrusted`.
-- Decisions: `docs/adr/0003-trace-redaction-cost.md`.
+- Holdings (E2): `nivesh login` (daily InvestRight login, `--paste` for a pasted URL or token), `nivesh sync [--ltp]`, `nivesh ingest` (CAS PDFs from `<data_dir>/inbox`, password and folio salt from the keychain), `nivesh import-csv PATH [--preset zerodha|groww|upstox --label NAME]`. The `holdings` MCP server exposes seven read-only tools: `session_status`, `get_holdings`, `get_positions`, `get_funds`, `combined_portfolio`, `get_transactions`, `read_cas_statement`. Runbook: `docs/runbooks/investright.md`. PII (names, PAN, e-mail, mobile, address, DP/client IDs, folios) never leaves `nivesh_adapters/cas.py`; folio and demat identifiers are stored only as a salted `holder_ref`.
+- Decisions: `docs/adr/0003-trace-redaction-cost.md`, `docs/adr/0004-holdings-ingestion.md`.
 
 ## Deferred
 - E13 F1: numeric replay over real engines (`REPLAYABLE` is empty until E6).
 - E13 F2: schema-constrained verdict output and the red-team injection eval (needs ST-7.1, ST-12.6).
 - E13 F3: scheduler service in compose and the nightly backup job (E11); only the command and a host cron line exist.
-- E13 F4: HDFC IP registration, daily-login SSH tunnel and egress check against a real broker (documented only; E2).
+- E13 F4 (remainder): registration steps and the SSH tunnel are documented (`docs/runbooks/investright.md`, `docs/deploy/vm.md`) but unverified against the live HDFC portal; see E2 D2 and D5 below.
 - E13 F5: restore reproducing "the last report" (reports are E10); run dirs and stores are restored.
 - E13 F6: paid-data cost recording and delivery of cost warnings (stderr and `status` only).
-- E13 F7: broker client class introspection beyond the empty set (discovery is in place; E2).
+- E13 F7: resolved by E2; `InvestRightClient` is covered by the introspection test and by a discovery lock-in test.
 - E13 review notes: `replay` redacted-data comparison is dormant while `REPLAYABLE` is empty and must be fixed before E6 engines land; a crash before any result message records 0 cost; the budget check is not concurrency-safe; backup archive extraction has no size limit; `replay` compares redacted data (a difference hidden by redaction is not detected); the monthly budget is checked only at run start (a long run can overshoot); field-name redaction is blunt (any key containing `key`, `client`, etc. is masked).
 - E13 F8: live verification of `docker compose up`, a VM, a Linux keychain, and real `age` in CI (the real-age test skips when the binary is absent; `docker build` reached `uv sync` locally but the network timed out).
-- ST-1.1 AC3, move of the seed `investright-mcp` into `nivesh_adapters/investright` and
-  `nivesh_mcp/holdings`: the seed is absent from this repo, so it is skipped; tracked under E2.
+- ST-1.1 AC3, move of the seed `investright-mcp`: the seed is absent from this repo, so E2 wrote
+  `nivesh_adapters/investright*.py` and `nivesh_mcp/holdings.py` from the spec (wire details unverified, D2).
+- E2 deferred (each gets a follow-up issue):
+  - D1: ST-4.8 security master (nightly NSE/BSE/AMFI loads, fuzzy names, renamed-ISIN map); E2 ships a `SecurityResolver` Protocol with a table-backed resolver, and unresolved ISINs are kept with the ISIN as symbol and flagged.
+  - D2: live HDFC/InvestRight verification (login URL, request-token parameter, response and row field names, 401/403 versus code 60014 wording, User-Agent need, static-IP behaviour, LTP request body).
+  - D3: round trip of real CDSL/NSDL/CAMS/KFintech CAS PDFs through casparser (fixtures are models built in code; one `live` test accepts an owner-supplied PDF).
+  - D4: Zerodha/Groww/Upstox preset layouts verified against real exports.
+  - D5: daily login on the VM over an SSH tunnel and a real-socket test of the loopback callback listener.
+  - D6: non-INR CSV rows, US holdings and FX (E3).
+  - D7: a holdings TTL in cache config (live holdings bypass the cache).
+  - D8: NPS and other non-listed asset types in NSDL CAS; XIRR and tax lots from stored transactions.
+  - D9: overlap mapping for several InvestRight-linked demats (`investright.demat_ref` handles one).
 - ST-1.3 AC1, full PID section 13 schema: only core tables (`schema_version`, `security`,
   `account`, `run`, plus the DuckDB `cache_entry`) exist now; later epics add the rest as migrations
   (see ADR-0002).
