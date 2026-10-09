@@ -1,0 +1,4 @@
+account_label,isin,symbol,exchange,quantity,avg_cost,currency,asset_class
+Example Broker,INE000A01010,,,10,2450.50,INR,equity
+Example Broker,,SAMPLECO,NSE,"1,200",95.25,INR,equity
+Bank deposits,,FD-SAMPLE,,100000,,INR,fd

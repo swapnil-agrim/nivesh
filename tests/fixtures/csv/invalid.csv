@@ -1,0 +1,10 @@
+account_label,isin,symbol,exchange,quantity,avg_cost,currency,asset_class
+Other Broker,INE000A01010,,,10,5,INR,equity
+Other Broker,,,,10,5,INR,equity
+Other Broker,INE111A01011,,,abc,5,INR,equity
+Other Broker,INE222B01012,,,10,5,USD,equity
+Other Broker,INE333C01013,,,10,5,INR,crypto
+Other Broker,INE444D01014,,,-3,5,INR,equity
+Other Broker,BADISIN,,,3,5,INR,equity
+,INE555E01015,,,3,5,INR,equity
+Other Broker,INE666F01016,,,3,,INR,equity

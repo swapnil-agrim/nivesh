@@ -9,3 +9,11 @@ prices:
 usd_inr: 90.0
 # registered_ip: 203.0.113.7   # egress IP registered with the broker (optional)
 # backup: {target: /backups, recipient: age1..., retention_days: 30}
+# HDFC InvestRight API app (secrets stay in the keychain; see docs/runbooks/investright.md).
+# base_url is per spec, unverified against the live API.
+investright:
+  base_url: https://developer.hdfcsec.com
+  redirect_port: 8765
+  app_key: ref:INVESTRIGHT_API_KEY
+  api_secret: ref:INVESTRIGHT_API_SECRET
+  # demat_ref: <holder_ref printed by `nivesh ingest` for the demat linked to InvestRight>

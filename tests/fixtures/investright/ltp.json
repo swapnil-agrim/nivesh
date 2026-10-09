@@ -1,0 +1,7 @@
+{
+  "status": "success",
+  "data": [
+    {"exchange": "NSE", "security_id": "RELI", "ltp": "2,505.75"},
+    {"exchange": "NSE", "security_id": "CLOSEONLY", "ltp": "1,205.00"}
+  ]
+}

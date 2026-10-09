@@ -1,19 +1,19 @@
 import asyncio
 import sqlite3
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from nivesh_agents.runtime import run_command, safe_error
+from nivesh_cli.common import settings_of, user_errors
+from nivesh_cli.holdings import holdings_app
 from nivesh_core.config import Settings, load_settings
 from nivesh_core.cost import gate, month_to_date
 from nivesh_core.db import init_stores
 from nivesh_core.db.sqlite import open_sqlite
 from nivesh_core.egress import check_egress
-from nivesh_core.errors import ConfigError, NiveshError, SecretNotFound
+from nivesh_core.errors import ConfigError, SecretNotFound
 from nivesh_core.paths import run_dir
 from nivesh_core.profile import Profile, load_profile
 from nivesh_core.secrets import SecretRef, secret_exists, set_secret
@@ -26,16 +26,7 @@ mcp_app = typer.Typer(no_args_is_help=True, help="MCP server tools.")
 app.add_typer(mcp_app, name="mcp")
 secrets_app = typer.Typer(no_args_is_help=True, help="Manage secrets in the OS keychain.")
 app.add_typer(secrets_app, name="secrets")
-
-
-@contextmanager
-def user_errors() -> Iterator[None]:
-    """Expected failures become a clean message on stderr and a non-zero exit."""
-    try:
-        yield
-    except NiveshError as e:
-        typer.echo(f"error: {e}", err=True)
-        raise typer.Exit(1) from None
+app.registered_commands.extend(holdings_app.registered_commands)  # login, sync, ingest, ...
 
 
 @app.callback()
@@ -52,8 +43,7 @@ def _startup(
 
 
 def _settings(ctx: typer.Context) -> Settings:
-    settings: Settings = ctx.obj[0]
-    return settings
+    return settings_of(ctx)
 
 
 def _profile(ctx: typer.Context) -> Profile:

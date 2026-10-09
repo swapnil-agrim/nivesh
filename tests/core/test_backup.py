@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 
 from nivesh_cli.main import app
 from nivesh_core import backup
-from nivesh_core.db import init_stores
+from nivesh_core.db import MIGRATIONS, init_stores, migrate
 from nivesh_core.errors import NiveshError
 from tests import pii_values as pv
 
@@ -61,7 +61,8 @@ def test_backup_restore_roundtrip(tmp_path: Path) -> None:
     assert c.execute("select count(*) from account").fetchone() == (1,)
     assert c.execute("select symbol from security").fetchone() == ("X",)
     assert c.execute("select command from run").fetchone() == ("ping",)
-    assert c.execute("select max(version) from schema_version").fetchone() == (2,)
+    latest = migrate.latest_version(MIGRATIONS / "sqlite")
+    assert c.execute("select max(version) from schema_version").fetchone() == (latest,)
     c.close()
     with duckdb.connect(str(fresh / "nivesh.duckdb")) as k:
         k.execute("select * from cache_entry")

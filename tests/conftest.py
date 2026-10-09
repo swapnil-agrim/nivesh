@@ -1,5 +1,7 @@
+import shutil
 import socket
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import keyring
@@ -55,3 +57,22 @@ def fake_keyring() -> Iterator[MemoryKeyring]:
     keyring.set_keyring(backend)
     yield backend
     keyring.set_keyring(old)
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def cli_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], Path]:
+    """(global CLI args, data_dir): a tmp config dir whose data_dir is inside tmp_path."""
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    data = tmp_path / "data"
+    text = (
+        (ROOT / "config" / "nivesh.yaml").read_text().replace("data_dir: data", f"data_dir: {data}")
+    )
+    (cfg / "nivesh.yaml").write_text(text)
+    shutil.copy(ROOT / "config" / "profile.yaml", cfg / "profile.yaml")
+    for name in ("INVESTRIGHT_API_KEY", "INVESTRIGHT_API_SECRET", "CAS_PASSWORD", "FOLIO_SALT"):
+        monkeypatch.delenv(name, raising=False)
+    return ["--config-dir", str(cfg)], data

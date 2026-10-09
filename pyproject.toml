@@ -17,6 +17,7 @@ dependencies = [
   "duckdb==1.5.6",
   "typer==0.27.3",
   "httpx==0.28.1",
+  "casparser==1.4.1",
 ]
 
 [project.scripts]
@@ -51,6 +52,10 @@ python_version = "3.11"
 strict = true
 files = ["nivesh_core", "nivesh_engine", "nivesh_adapters", "nivesh_mcp", "nivesh_agents", "nivesh_cli"]
 
+[[tool.mypy.overrides]]
+module = ["casparser", "casparser.*"]
+ignore_missing_imports = true  # casparser ships no py.typed; used only in nivesh_adapters/cas.py
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
@@ -65,5 +70,4 @@ asyncio_mode = "auto"
 branch = true
 
 [tool.coverage.report]
-# nivesh_engine is empty until E6, so its coverage is vacuous for now (README).
 show_missing = true

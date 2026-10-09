@@ -1,0 +1,13 @@
+{
+  "status": "success",
+  "data": [
+    {"security_id": "RELI", "name": "Reliance Industries", "isin": "INE000A01010", "exchange": "NSE",
+     "quantity": "1,234", "average_price": "2,450.50", "close_price": "2,500.00"},
+    {"security_id": "", "name": "", "isin": "INE111A01011", "exchange": "NSE",
+     "quantity": "10", "average_price": "95.25", "close_price": "100.50"},
+    {"security_id": "CLOSEONLY", "name": "Close Only Ltd", "isin": "INE222B01012", "exchange": "NSE",
+     "quantity": "5", "close_price": "1,200.00"},
+    {"security_id": "", "name": "", "isin": "INE999Z01019", "exchange": "NSE",
+     "quantity": "3", "average_price": "10", "close_price": "11"}
+  ]
+}

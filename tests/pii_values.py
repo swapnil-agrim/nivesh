@@ -41,4 +41,53 @@ def address_line() -> str:
     return "Address: " + "12 Some Street, Mumbai 400001"
 
 
+# Low-entropy dummies for the E2 tests (never realistic credentials).
+def request_token() -> str:
+    return "req" + "x" * 12
+
+
+def api_secret() -> str:
+    return "sec" + "y" * 12
+
+
+def api_key_value() -> str:
+    return "key" + "z" * 12
+
+
+def access_token() -> str:
+    return "acc" + "w" * 12
+
+
+def salt() -> str:
+    return "salt" * 4
+
+
+def holder_name() -> str:
+    return "Test" + " " + "Holder" + " " + "Name"
+
+
+def dp_code() -> str:
+    return "IN" + "30" + "0000"
+
+
+def client_code() -> str:
+    return "1234" + "5678"
+
+
+def cas_password() -> str:
+    return "pw" * 4
+
+
 ALL = [pan, phone, phone_spaced, email, api_key, bearer, folio, account, dp_id, address_line]
+
+
+def folio_number() -> str:
+    return "12345" + "678901"
+
+
+def person_address() -> str:
+    return "12 Some Street, Mumbai 400001"
+
+
+def mobile_digits() -> str:
+    return "98765" + "43210"
