@@ -2,6 +2,7 @@
 Nothing is fetched and nothing is written; every figure is built from integer arithmetic."""
 
 import json
+import re
 import socket
 import sqlite3
 from datetime import date
@@ -324,5 +325,6 @@ def test_no_network_is_attempted(env: Env, monkeypatch: pytest.MonkeyPatch, tmp_
 def test_help_lists_the_new_commands(cli_env: Env) -> None:
     r = runner.invoke(app, [*cli_env[0], "--help"])
     assert r.exit_code == 0
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", r.output)
     for name in ("ta", "fa", "valuation", "flags", "xray", "risk", "screen", "score"):
-        assert f" {name} " in r.output, name
+        assert re.search(rf"(^|\s|│){name}(\s|$)", plain, re.M), name
