@@ -205,3 +205,28 @@ review:
   valuation_history_years: 5
   below_sma200_sessions: 60
   deterioration_quarters: 2
+
+# E9 idea generation: owner-set parameters, example only and equal to the built-in defaults
+# (nothing here is advice). Index membership comes from a file you load with
+# `nivesh universe load`; no list is bundled. Liquidity floors compare the 20-day average daily
+# value traded in the bar currency (crore = 10^7 INR; USD in millions, before any FX).
+universe:
+  indices:
+    NIFTY500: {market: IN, enabled: true}
+    NIFTYSMALLCAP250: {market: IN, enabled: false}
+    SP500: {market: US, enabled: true}
+    NASDAQ100: {market: US, enabled: true}
+    RUSSELL1000: {market: US, enabled: false}
+  liquidity:
+    IN: {min_adv_crore: 5}
+    US: {min_adv_usd_m: 20}
+  max_age_days: 35              # older membership snapshot: a warning, not a failure
+  max_bar_age_days: 7           # older last bar: liquidity unknown, excluded
+ideas:
+  shortlist_size: 8
+  shortlist_max: 12             # hard cap per market on committee runs
+  sector_cap: 2
+  default_n: 5
+  held: label                   # label held names as ADD candidates, or "exclude" them
+  default_preset: lt-quality-value
+  max_runs: 16                  # committee runs per command across markets

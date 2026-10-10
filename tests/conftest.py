@@ -73,6 +73,7 @@ def cli_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str],
     )
     (cfg / "nivesh.yaml").write_text(text)
     shutil.copy(ROOT / "config" / "profile.yaml", cfg / "profile.yaml")
+    shutil.copytree(ROOT / "config" / "screens", cfg / "screens")
     for name in ("INVESTRIGHT_API_KEY", "INVESTRIGHT_API_SECRET", "CAS_PASSWORD", "FOLIO_SALT"):
         monkeypatch.delenv(name, raising=False)
     return ["--config-dir", str(cfg)], data

@@ -1,0 +1,9 @@
+# Long-term quality at a reasonable price. Example thresholds you own and tune; not advice.
+# Return on equity (not ROCE: India filings cannot support it) and red flags are required, so a
+# name that cannot be tested on them is out.
+name: lt-quality-value
+rules:
+  - {id: quality_roe, metric: roe, op: ">=", value: 15, required: true}
+  - {id: no_hard_red_flag, metric: hard_flag_count, op: "==", value: 0, required: true}
+  - {id: not_expensive_vs_own_history, metric: valuation_percentile, op: "<=", value: 40}
+  - {id: estimates_not_cut, metric: revisions, op: ">=", value: 0}

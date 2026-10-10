@@ -20,7 +20,9 @@ import typer
 from nivesh_adapters import analysis_service as svc
 from nivesh_adapters.analysis_data import load_screen_inputs
 from nivesh_adapters.analysis_service import plain
-from nivesh_cli.common import settings_of, user_errors
+from nivesh_adapters.ideas_service import load_preset
+from nivesh_adapters.universe_service import MARKETS, resolve_universe
+from nivesh_cli.common import config_dir_of, settings_of, user_errors
 from nivesh_core.analysis_config import AnalysisSettings
 from nivesh_core.config import Settings
 from nivesh_core.db import init_stores
@@ -30,7 +32,7 @@ from nivesh_core.errors import NiveshError
 from nivesh_core.profile import Profile
 from nivesh_core.timeutil import ist_date, utcnow
 from nivesh_engine.metrics import REGISTRY, inputs_needed
-from nivesh_engine.screen import parse_rules, screen
+from nivesh_engine.screen import RuleSet, parse_rules, screen
 
 engine_app = typer.Typer()
 
@@ -213,13 +215,50 @@ def risk_cmd(
     emit("risk", candidate, day, result, as_json)
 
 
+def _rule_set(
+    ctx: typer.Context, rules: Path | None, preset: str | None, max_rules: int
+) -> RuleSet:
+    """The rules from one file or one named preset, never both and never neither."""
+    if (rules is None) == (preset is None):
+        raise NiveshError("give exactly one of --rules FILE and --preset NAME")
+    if rules is None:
+        return load_preset(config_dir_of(ctx), preset or "", max_rules=max_rules)
+    try:
+        text = rules.read_text()
+    except OSError as e:
+        raise NiveshError(f"cannot read the rule file {rules}: {e.strerror}") from None
+    return parse_rules(text, max_rules=max_rules)
+
+
 # ---- the universe commands ----------------------------------------------------------------------
+def _screen_ids(
+    r: Reader, security: list[str], universe: str | None, day: date
+) -> tuple[list[int], str, list[str]]:
+    """(ids, basis, warnings) of an explicit list or of a named universe, never both."""
+    if universe is None:
+        ids, basis = svc.universe_ids(r.duck, r.sql, security)
+        return ids, basis, []
+    if security:
+        raise NiveshError("--universe and --security are alternatives, not a pair")
+    market = MARKETS.get(universe.lower())
+    if market is None:
+        raise NiveshError(f"--universe must be one of {', '.join(MARKETS)}")
+    res = resolve_universe(r.duck, r.sql, r.settings, r.profile, market, day)
+    return list(res.ids), res.basis, res.warnings
+
+
 @engine_app.command("screen")
 def screen_cmd(
     ctx: typer.Context,
-    rules: Annotated[Path, typer.Option(help="YAML rule file.")],
+    rules: Annotated[Path | None, typer.Option(help="YAML rule file.")] = None,
+    preset: Annotated[
+        str | None, typer.Option(help="A preset from config/screens (instead of --rules).")
+    ] = None,
     security: Annotated[
         list[str] | None, typer.Option(help="Limit the universe to these (repeatable).")
+    ] = None,
+    universe: Annotated[
+        str | None, typer.Option(help="A named universe: india or us (instead of --security).")
     ] = None,
     as_of: AsOf = None,
     as_json: AsJson = False,
@@ -227,22 +266,27 @@ def screen_cmd(
     """Run a YAML rule file over the stored securities; skipped rules are reported, not passed."""
     with user_errors(), reader(ctx) as r:
         day = _as_of(as_of)
-        try:
-            text = rules.read_text()
-        except OSError as e:
-            raise NiveshError(f"cannot read the rule file {rules}: {e.strerror}") from None
-        rule_set = parse_rules(text, max_rules=r.cfg.screen.max_rules)
+        rule_set = _rule_set(ctx, rules, preset, r.cfg.screen.max_rules)
         unknown = sorted({x.metric for x in rule_set.rules} - REGISTRY.keys())
         if unknown:  # parse_rules rejects these; kept as a clear guard for registry changes
             raise NiveshError(f"unknown metric(s): {', '.join(unknown)}")
-        ids, basis = svc.universe_ids(r.duck, r.sql, security or [])
+        ids, basis, warnings = _screen_ids(r, security or [], universe, day)
         needs = inputs_needed(x.metric for x in rule_set.rules)
-        universe = load_screen_inputs(r.duck, r.sql, ids, day, r.cfg, needs=needs)
+        stocks = load_screen_inputs(r.duck, r.sql, ids, day, r.cfg, needs=needs)
         try:
-            found = screen(universe, rule_set, as_of=day, cfg=r.cfg)
+            found = screen(
+                stocks,
+                rule_set,
+                as_of=day,
+                cfg=r.cfg,
+                basis=basis if universe is not None else None,
+            )
         except ValueError as e:
             raise NiveshError(str(e)) from None
-    emit("screen", rule_set.name, day, {"screen": found, "requested_basis": basis}, as_json)
+    result: dict[str, object] = {"screen": found, "requested_basis": basis}
+    if warnings:
+        result["warnings"] = warnings
+    emit("screen", rule_set.name, day, result, as_json)
 
 
 @engine_app.command("score")

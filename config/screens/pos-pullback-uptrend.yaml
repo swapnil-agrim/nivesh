@@ -1,0 +1,7 @@
+# Positional: a pullback to the 50-day average inside an uptrend. Example thresholds you own and
+# tune; not advice. The technical rules never stand alone: a fundamentals rule is required (BR-12).
+name: pos-pullback-uptrend
+rules:
+  - {id: sound_business, metric: roe, op: ">=", value: 10, required: true}
+  - {id: above_200dma, metric: price_vs_sma200_pct, op: ">", value: 0, required: true}
+  - {id: pullback_setup, metric: pullback_to_50dma, op: "==", value: 1, required: true}

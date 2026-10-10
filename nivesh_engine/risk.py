@@ -18,6 +18,7 @@ from nivesh_core.analysis_config import RiskSettings
 from nivesh_engine import dmath
 from nivesh_engine.bars import Bar
 from nivesh_engine.metric import Metric, na, ok
+from nivesh_engine.universe import adv_value
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
@@ -215,13 +216,10 @@ def _days_to_trade(
     as_of: date | None,
     cfg: RiskSettings,
 ) -> Metric:
-    used = [b for b in series if as_of is None or b.date <= as_of][-cfg.adv_days :]
-    if len(used) < cfg.adv_days:
-        return na(f"need {cfg.adv_days} bars with volume, have {len(used)}")
-    volumes = [b.volume for b in used]
-    if any(v is None for v in volumes):
-        return na(f"volume missing in the last {cfg.adv_days} bars")
-    adv = dmath.mean([v for v in volumes if v is not None]) * used[-1].close * inr_per_unit
+    got = adv_value(series, cfg.adv_days, inr_per_unit, as_of)
+    if got.value is None:
+        return na(got.reason or "no volume")
+    adv = got.value
     if adv <= 0:
         return na("average daily value traded is zero")
     daily = cfg.participation_pct / HUNDRED * adv

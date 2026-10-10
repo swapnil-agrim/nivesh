@@ -12,6 +12,7 @@ from nivesh_core.analysis_config import AnalysisSettings
 from nivesh_core.errors import ConfigError
 from nivesh_core.review_config import ReviewSettings
 from nivesh_core.secrets import REF_RE
+from nivesh_core.universe_config import IdeasSettings, UniverseSettings
 from nivesh_core.yamlio import read_mapping, validate
 
 _SECRETISH = re.compile(r"(_key|_token|_secret|password)$", re.IGNORECASE)
@@ -311,6 +312,8 @@ class Settings(BaseModel):
     analysis: AnalysisSettings = AnalysisSettings()
     agents: AgentsSettings = AgentsSettings()
     review: ReviewSettings = ReviewSettings()
+    universe: UniverseSettings = UniverseSettings()
+    ideas: IdeasSettings = IdeasSettings()
 
     @field_validator("registered_ip")
     @classmethod

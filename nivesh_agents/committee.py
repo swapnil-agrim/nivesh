@@ -13,7 +13,7 @@ import json
 import sqlite3
 import time
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -102,8 +102,12 @@ class CommitteeResult:
 def prepare_inputs(
     duck: duckdb.DuckDBPyConnection, sql: sqlite3.Connection, settings: Settings,
     profile: Profile, queries: list[str], day: date, *, starter_weight_pct: Decimal,
+    cards: Mapping[int, ScoreCard] | None = None,
 ) -> CommitteeInputs:  # fmt: skip
-    """Resolve the securities and compute the score cards and risk facts in code."""
+    """Resolve the securities and compute the score cards and risk facts in code. `cards`
+    (by security id) are score cards already computed over a universe: nothing is scored again,
+    and a security without one gets an empty card, so its coverage reads as a data gap. A query
+    may be "id:<n>" to name one security exactly."""
     items: list[SecurityInput] = []
     for q in queries:
         sec = svc.resolve_security(sql, q)
@@ -116,7 +120,10 @@ def prepare_inputs(
                             scheme=str(row[0]) if row and row[0] else None)  # fmt: skip
             items.append(SecurityInput(target, None, facts))
             continue
-        card = svc.score_one(duck, sql, settings, q, "long_term", day).card
+        if cards is None:
+            card = svc.score_one(duck, sql, settings, q, "long_term", day).card
+        else:
+            card = cards.get(sec.id) or ScoreCard(sec.id, "long_term")  # empty: a data gap
         target = Target(sec.id, sec.symbol, sec.name or sec.symbol, sec.asset_class or "equity",
                         sec.market)  # fmt: skip
         items.append(SecurityInput(target, card, facts))

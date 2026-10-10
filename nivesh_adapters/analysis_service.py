@@ -42,6 +42,7 @@ from nivesh_engine.mf_returns import FundAnalytics, analyse_fund
 from nivesh_engine.redflags import any_hard, detect_flags
 from nivesh_engine.risk import risk_metrics
 from nivesh_engine.scoring import ScoreCard, ranking, raw_inputs, score_universe
+from nivesh_engine.universe import matches_exclusion
 from nivesh_engine.valuation import valuation_multiples, valuation_range
 from nivesh_engine.xray import portfolio_xray
 
@@ -234,11 +235,13 @@ class ScoreReport:
 def score_report(
     duck: duckdb.DuckDBPyConnection, sql: sqlite3.Connection, settings: Settings,
     symbols: Sequence[str], horizon: str, day: date, *, extra_ids: Sequence[int] = (),
+    named: tuple[Sequence[int], str] | None = None,
 ) -> ScoreReport:  # fmt: skip
-    """Composite 0-100 score by factor, band and cap, ranked within market and sector."""
+    """Composite 0-100 score by factor, band and cap, ranked within market and sector. `named`
+    is a (ids, basis) universe from `universe_service`, scored instead of the stored bars."""
     if horizon not in HORIZONS:
         raise NiveshError(f"--horizon must be one of {', '.join(HORIZONS)}")
-    ids, basis = universe_ids(duck, sql, symbols)
+    ids, basis = (list(named[0]), named[1]) if named else universe_ids(duck, sql, symbols)
     ids = sorted({*ids, *extra_ids})
     cfg = settings.analysis
     universe = load_screen_inputs(duck, sql, ids, day, cfg, needs=_SCORE_NEEDS)
@@ -348,9 +351,8 @@ def overlap_report(
 
 # ---- committee facts ----------------------------------------------------------------------------
 def _matches_exclusion(sec: SecurityRow, profile: Profile) -> bool:
-    names = {x.strip().casefold() for x in profile.exclusions}
-    own = {v.casefold() for v in (sec.symbol, sec.isin, sec.name) if v}
-    return bool(names & own)
+    """One helper for the risk veto and the universe filter: symbol, ISIN, name or sector."""
+    return matches_exclusion(profile.exclusions, sec.symbol, sec.isin, sec.name, sec.sector)
 
 
 def risk_facts(
@@ -371,7 +373,7 @@ def risk_facts(
     if flag_in is not None:
         hard = any_hard(detect_flags(flag_in, as_of=day, cfg=settings.analysis))
     inp = load_risk_inputs(
-        duck, sql, settings, day, candidate=sec.isin or sec.symbol, proposed_weight_pct=weight
+        duck, sql, settings, day, candidate=f"id:{sec.id}", proposed_weight_pct=weight
     )
     res = risk_metrics(
         inp.holdings, inp.candidate, inp.bars, inp.benchmarks, cfg=settings.analysis.risk,

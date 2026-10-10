@@ -286,6 +286,7 @@ PREFILTER_CAP = 300  # rows scored per fuzzy lookup
 MIN_SCORE = 0.5  # below this a name is not even a candidate
 ACCEPT_SCORE, ACCEPT_GAP = 0.92, 0.05
 _ISIN_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
+_ID_RE = re.compile(r"^id:(\d+)$")
 _NON_GROWTH = re.compile(r"(?i)\b(idcw|payout|dividend|reinvest\w*)\b")
 _SEC_COLS = "id, symbol, exchange, name, isin, currency, asset_class, market, sector, industry"
 
@@ -466,6 +467,10 @@ class SecurityMaster:
 
     def lookup(self, query: str, market: str | None = None) -> Lookup:
         q = query.strip()
+        pinned = _ID_RE.match(q)  # "id:12": an exact, unambiguous reference to one row
+        if pinned:
+            row = self.get(int(pinned.group(1)))
+            return self._exact([row], "id") if row else Lookup(None, None, [])
         if _ISIN_RE.match(q.upper()):
             isin = q.upper()
             rows = self._rows("isin = ?", (isin,), market) or self._via_alias("isin", isin, market)

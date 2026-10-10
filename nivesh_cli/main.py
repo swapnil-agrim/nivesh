@@ -8,10 +8,13 @@ from nivesh_agents.runtime import run_command, safe_error
 from nivesh_cli.common import metered_run, profile_of, settings_of, user_errors
 from nivesh_cli.engine import engine_app
 from nivesh_cli.holdings import holdings_app
+from nivesh_cli.ideas import ideas_app
 from nivesh_cli.market import market_app, master_app
 from nivesh_cli.mf import mf_app
 from nivesh_cli.review import review_app
 from nivesh_cli.thesis import thesis_app
+from nivesh_cli.universe import universe_app
+from nivesh_cli.watch import watch_app
 from nivesh_core.config import Settings, load_settings
 from nivesh_core.cost import gate, month_to_date
 from nivesh_core.db import init_stores
@@ -30,11 +33,14 @@ secrets_app = typer.Typer(no_args_is_help=True, help="Manage secrets in the OS k
 app.add_typer(secrets_app, name="secrets")
 app.registered_commands.extend(holdings_app.registered_commands)  # login, sync, ingest, ...
 app.registered_commands.extend(engine_app.registered_commands)  # ta, fa, valuation, ...
+app.registered_commands.extend(ideas_app.registered_commands)  # ideas
 app.add_typer(master_app, name="master")
 app.add_typer(market_app, name="market")
 app.add_typer(mf_app, name="mf")
 app.add_typer(thesis_app, name="thesis")
 app.add_typer(review_app, name="review")
+app.add_typer(universe_app, name="universe")
+app.add_typer(watch_app, name="watch")
 
 
 @app.callback()
@@ -43,6 +49,7 @@ def _startup(
     config_dir: Annotated[Path, typer.Option(envvar="NIVESH_CONFIG_DIR")] = Path("config"),
 ) -> None:
     """Validate config/nivesh.yaml and config/profile.yaml; fail fast on bad values."""
+    ctx.meta["config_dir"] = config_dir
     with user_errors():
         ctx.obj = (
             load_settings(config_dir / "nivesh.yaml"),
