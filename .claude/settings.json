@@ -8,9 +8,44 @@
       "mcp__holdings__get_funds",
       "mcp__holdings__combined_portfolio",
       "mcp__holdings__get_transactions",
-      "mcp__holdings__read_cas_statement"
+      "mcp__holdings__read_cas_statement",
+      "mcp__market__get_prices",
+      "mcp__market__get_index",
+      "mcp__market__get_quote_eod",
+      "mcp__market__get_corporate_actions",
+      "mcp__market__resolve_security",
+      "mcp__market__get_last_trading_day",
+      "mcp__fundamentals__get_statements",
+      "mcp__fundamentals__get_ratios",
+      "mcp__fundamentals__get_peers",
+      "mcp__fundamentals__get_estimates",
+      "mcp__fundamentals__get_shareholding",
+      "mcp__filings__list_filings",
+      "mcp__filings__get_filing_text",
+      "mcp__filings__get_announcements",
+      "mcp__news__get_news",
+      "mcp__news__get_events_calendar",
+      "mcp__news__get_next_results_date",
+      "mcp__macro__get_series",
+      "mcp__macro__get_flows_india",
+      "mcp__macro__get_rates_snapshot"
     ],
-    "deny": ["Bash", "WebFetch", "WebSearch", "Write", "Edit", "NotebookEdit"]
+    "deny": [
+      "Bash",
+      "WebFetch",
+      "WebSearch",
+      "Write",
+      "Edit",
+      "NotebookEdit"
+    ]
   },
-  "enabledMcpjsonServers": ["demo", "holdings"]
+  "enabledMcpjsonServers": [
+    "demo",
+    "holdings",
+    "market",
+    "fundamentals",
+    "filings",
+    "news",
+    "macro"
+  ]
 }

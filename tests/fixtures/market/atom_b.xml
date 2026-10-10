@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- hand-built per spec, unverified against live feeds -->
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Example Atom</title>
+  <entry><title>Reliance Industries Q3 results: net profit rises 12 percent</title>
+    <link href="https://atom.example.invalid/b/1"/>
+    <updated>2026-01-05T04:00:00Z</updated>
+    <summary>Same story from a second source.</summary></entry>
+  <entry><title>TCS CFO resigns</title>
+    <link rel="alternate" href="https://atom.example.invalid/b/2"/>
+    <published>2026-01-05T15:30:00+05:30</published>
+    <updated>2026-01-05T16:00:00+05:30</updated>
+    <summary>The board accepted the resignation.</summary></entry>
+</feed>

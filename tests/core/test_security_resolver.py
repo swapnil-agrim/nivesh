@@ -60,3 +60,23 @@ def test_resolved_carries_symbol_name_exchange_asset_class_and_amfi_code(
     assert got == Resolved(
         symbol="RELI", name="Reliance", exchange="NSE", asset_class="equity", amfi_code="A1"
     )
+
+
+def test_table_resolver_falls_back_to_isin_alias(conn: sqlite3.Connection) -> None:
+    sid = conn.execute("select id from security where symbol = 'RELI'").fetchone()[0]
+    conn.execute(
+        "insert into security_alias (kind, value, security_id) values ('isin', 'INE555Q01010', ?)",
+        (sid,),
+    )
+    got = TableResolver(conn).resolve("INE555Q01010")
+    assert got is not None and got.symbol == "RELI"
+    assert TableResolver(conn).resolve("INE556Q01010") is None
+
+
+def test_alias_fallback_ignores_unresolved_placeholder_targets(conn: sqlite3.Connection) -> None:
+    sid = conn.execute("select id from security where unresolved = 1").fetchone()[0]
+    conn.execute(
+        "insert into security_alias (kind, value, security_id) values ('isin', 'INE555Q01010', ?)",
+        (sid,),
+    )
+    assert TableResolver(conn).resolve("INE555Q01010") is None

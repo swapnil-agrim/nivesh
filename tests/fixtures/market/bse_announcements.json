@@ -1,0 +1,12 @@
+{"_note": "hand-built per spec, unverified against the live BSE API",
+ "Table": [
+  {"SCRIP_CD": "500325", "HEADLINE": "Reliance Industries Limited - Board Meeting Intimation for Quarterly Results",
+   "NEWS_DT": "2026-01-05T11:00:00", "CATEGORYNAME": "Board Meeting", "MEETING_DATE": "2026-01-16",
+   "NSURL": "https://www.bse.example.invalid/a/1"},
+  {"SCRIP_CD": "532540", "HEADLINE": "TCS - Outcome of Board Meeting",
+   "NEWS_DT": "2026-01-05T12:30:00", "CATEGORYNAME": "Outcome", "MEETING_DATE": "",
+   "NSURL": "https://www.bse.example.invalid/a/2"},
+  {"SCRIP_CD": "999999", "HEADLINE": "Unknown scrip announcement",
+   "NEWS_DT": "2026-01-05T12:45:00", "CATEGORYNAME": "General", "MEETING_DATE": "",
+   "NSURL": "https://www.bse.example.invalid/a/3"}
+ ]}

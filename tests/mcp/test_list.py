@@ -36,3 +36,24 @@ def test_entrypoint_rejects_unknown_server() -> None:
     from nivesh_mcp.__main__ import main
 
     assert main(["nope"]) == 2
+
+
+def test_registry_has_all_seven_servers() -> None:
+    assert list(SERVERS) == [
+        "demo",
+        "holdings",
+        "market",
+        "fundamentals",
+        "filings",
+        "news",
+        "macro",
+    ]
+
+
+def test_mcp_list_prints_all_twenty_new_tools() -> None:
+    r = CliRunner().invoke(app, ["--config-dir", CFG, "mcp", "list"])
+    new = ("market", "fundamentals", "filings", "news", "macro")
+    assert sum(len(SERVERS[n].tool_names) for n in new) == 20
+    for n in new:
+        for tool in SERVERS[n].tool_names:
+            assert f"{n}: {tool}" in r.output

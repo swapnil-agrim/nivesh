@@ -56,7 +56,13 @@ def _snapshot(data_dir: Path, into: Path) -> None:
             src.close()
     dk = data_dir / "nivesh.duckdb"
     if dk.exists():
-        con = duckdb.connect(str(dk))
+        try:
+            con = duckdb.connect(str(dk))
+        except (duckdb.IOException, duckdb.ConnectionException):
+            raise NiveshError(
+                "the market database is in use by an ingest or another reader; "
+                "retry the backup when it finishes"
+            ) from None
         try:
             con.execute("CHECKPOINT")
         finally:

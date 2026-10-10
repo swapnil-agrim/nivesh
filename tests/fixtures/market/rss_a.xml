@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- hand-built per spec, unverified against live feeds -->
+<rss version="2.0"><channel><title>Example Wire</title>
+  <item><title>Reliance Industries Q3 results: net profit rises 12 percent - Example Wire</title>
+    <link>https://news.example.invalid/a/1?utm_source=rss</link>
+    <pubDate>Mon, 05 Jan 2026 09:00:00 +0530</pubDate>
+    <description>Quarterly results beat estimates.</description></item>
+  <item><title>TCS bags large order from European retailer</title>
+    <link>https://news.example.invalid/a/2</link>
+    <pubDate>Mon, 05 Jan 2026 10:00:00 GMT</pubDate>
+    <description>&lt;p&gt;Deal value &lt;b&gt;undisclosed&lt;/b&gt; &amp;amp; multi-year.&lt;/p&gt;</description></item>
+  <item><title>Broker note without a date</title>
+    <link>https://news.example.invalid/a/3</link></item>
+  <item><title>RELIANCE and TCS lead the gainers</title>
+    <link>https://news.example.invalid/a/4</link>
+    <pubDate>Mon, 05 Jan 2026 11:00:00 GMT</pubDate></item>
+  <item><title>Markets close higher on Monday</title>
+    <link>https://news.example.invalid/a/5</link>
+    <pubDate>not a date</pubDate></item>
+</channel></rss>

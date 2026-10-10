@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- hand-built per spec, unverified against real BSE bank filings (tag mapping: deferred D3) -->
+<xbrli:xbrl xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:in-bse-fin="http://www.bseindia.com/xbrl/fin/2020-03-31/in-bse-fin">
+  <xbrli:context id="OneD"><xbrli:entity><xbrli:identifier scheme="http://www.bseindia.com">500180</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:startDate>2025-10-01</xbrli:startDate><xbrli:endDate>2025-12-31</xbrli:endDate></xbrli:period></xbrli:context>
+  <xbrli:unit id="INR_Crores"><xbrli:measure>iso4217:INR</xbrli:measure></xbrli:unit>
+  <xbrli:unit id="pure"><xbrli:measure>xbrli:pure</xbrli:measure></xbrli:unit>
+  <in-bse-fin:NatureOfReportStandaloneConsolidated contextRef="OneD">Standalone</in-bse-fin:NatureOfReportStandaloneConsolidated>
+  <in-bse-fin:InterestEarned contextRef="OneD" unitRef="INR_Crores" decimals="2">7100.50</in-bse-fin:InterestEarned>
+  <in-bse-fin:ProfitLossForPeriod contextRef="OneD" unitRef="INR_Crores" decimals="2">1650.25</in-bse-fin:ProfitLossForPeriod>
+  <in-bse-fin:PercentageOfGrossNpa contextRef="OneD" unitRef="pure" decimals="2">1.24</in-bse-fin:PercentageOfGrossNpa>
+  <in-bse-fin:PercentageOfNpa contextRef="OneD" unitRef="pure" decimals="2">0.33</in-bse-fin:PercentageOfNpa>
+  <in-bse-fin:NetInterestMargin contextRef="OneD" unitRef="pure" decimals="2">3.45</in-bse-fin:NetInterestMargin>
+  <in-bse-fin:CASARatio contextRef="OneD" unitRef="pure" decimals="2">38.20</in-bse-fin:CASARatio>
+  <in-bse-fin:CapitalAdequacyRatioBaselIII contextRef="OneD" unitRef="pure" decimals="2">18.90</in-bse-fin:CapitalAdequacyRatioBaselIII>
+</xbrli:xbrl>

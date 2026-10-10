@@ -4,6 +4,9 @@
 refetch fails the stale entry is returned flagged `stale=True` (also under refresh: degraded data
 that is visibly marked beats no data); with no entry the error propagates. DataQualityError is
 never masked by stale data and bad data is never cached.
+
+`redact=False` is for public market data (no user PII) whose identifiers the parsers need intact;
+payloads must then be JSON-native. Broker/user data keeps the default masking.
 """
 
 import hashlib
@@ -35,6 +38,7 @@ def cached_fetch(
     conn: duckdb.DuckDBPyConnection,
     ttls: Ttls,
     refresh: bool = False,
+    redact: bool = True,
     now: Callable[[], datetime] = utcnow,
 ) -> AdapterResult:
     if data_type not in Ttls.model_fields:
@@ -73,7 +77,7 @@ def cached_fetch(
         "INSERT OR REPLACE INTO cache_entry VALUES (?, ?, ?, ?, ?, ?)",
         (
             *key,
-            json.dumps(redact_json(fresh.data), default=str),
+            json.dumps(redact_json(fresh.data) if redact else fresh.data, default=str),
             fresh.source,
             to_iso(fresh.as_of),
             to_iso(now()),

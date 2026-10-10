@@ -1,0 +1,8 @@
+Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Net Asset Value;Date
+
+Open Ended Schemes(Equity Scheme - Large Cap Fund)
+
+Example Mutual Fund
+100001;INF000A01011;INF000A01029;Example Bluechip Fund - Growth;45.1234;05-Jan-2026
+100002;INF111B01012;-;Example Flexi Fund - Direct Plan - Growth;120.5000;05-Jan-2026
+100003;N.A.;;Example Closed Fund;10.0000;05-Jan-2026

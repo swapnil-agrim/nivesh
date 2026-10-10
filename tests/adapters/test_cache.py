@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -153,3 +154,35 @@ def test_pii_redacted_before_caching(db: Any) -> None:
     assert fresh.data["pan"] == "ABCDE1234F"  # caller of a live fetch sees the real data
     (payload,) = db.execute("select payload from cache_entry").fetchone()
     assert "ABCDE1234F" not in payload and "123456789012" not in payload
+
+
+def _market_payload() -> dict[str, Any]:
+    long_value = "1" + "2" * 11  # 12-digit value carried as a string
+    cik = "0" + "0012" + "3456" + "7"
+    return {
+        "value": long_value,
+        "url": "https://example.test/Archives/" + cik + "/" + "1" * 18 + "/doc.htm",
+        "cik": cik,
+        "nested": {"key": "kept"},
+    }
+
+
+def test_market_payload_survives_cache_hit_twice(db: duckdb.DuckDBPyConnection) -> None:
+    f, clock = Fake(), Clock()
+    f.payload = _market_payload()
+    first = cached_fetch(f, {"a": 1}, "price", conn=db, ttls=Ttls(), redact=False, now=clock)
+    second = cached_fetch(f, {"a": 1}, "price", conn=db, ttls=Ttls(), redact=False, now=clock)
+    third = cached_fetch(f, {"a": 1}, "price", conn=db, ttls=Ttls(), redact=False, now=clock)
+    stored = json.loads(db.execute("SELECT payload FROM cache_entry").fetchone()[0])  # type: ignore[index]
+    assert f.calls == 1
+    assert first.data == second.data == third.data == stored == f.payload
+
+
+def test_default_redact_true_still_masks_digit_runs_and_key_fields(
+    db: duckdb.DuckDBPyConnection,
+) -> None:
+    f, clock = Fake(), Clock()
+    f.payload = _market_payload()
+    cached_fetch(f, {"a": 1}, "price", conn=db, ttls=Ttls(), now=clock)
+    stored = json.loads(db.execute("SELECT payload FROM cache_entry").fetchone()[0])  # type: ignore[index]
+    assert stored["value"] == "[REDACTED]" and stored["nested"]["key"] == "[REDACTED]"

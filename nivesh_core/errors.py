@@ -20,3 +20,19 @@ class InvestRightError(NiveshError):
     def __init__(self, message: str, code: int | None = None) -> None:
         super().__init__(message)
         self.code = code
+
+
+class CalendarUnknown(NiveshError):
+    """A trading-calendar question was asked for a year with no holiday data (never guessed)."""
+
+
+class MarketDataError(NiveshError):
+    """A market-data source failed or sent something unusable."""
+
+
+class RateLimited(MarketDataError):
+    """The source answered HTTP 429; back off instead of retrying in a loop."""
+
+
+class SourceUnavailable(MarketDataError):
+    """The source is down, blocked or returned an unexpected HTTP status."""
