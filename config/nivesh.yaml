@@ -79,3 +79,93 @@ mf:
   exit_load: {}                 # e.g. {"Equity: Large Cap": {percent: 1, days: 365}}
   tax: {}                       # long_term_days, short_rate_pct, long_rate_pct (unset: gain and days only)
   screen: {weights: {consistency: 1, downside: 1, cost: 1, valuation: 1}, universe: []}
+
+# E6 analysis engines: owner-set parameters, example only and equal to the built-in defaults
+# (nothing here is advice). Factor weights are versioned: weights_version is your label, and a
+# digest of the weights is emitted with every score. Benchmarks, sector indices, market-cap bands
+# and peer overrides are empty until you set them; the engines then say so instead of guessing.
+analysis:
+  ta:
+    sma_windows: [20, 50, 200]
+    ema_window: 21
+    rsi_period: 14
+    atr_period: 14
+    macd_fast: 12
+    macd_slow: 26
+    macd_signal: 9
+    roc_sessions: [63, 126, 252]
+    vol_windows: [20, 60]
+    bollinger_window: 20
+    bollinger_width_k: 2
+    slope_lookback: 20
+    year_window: 252
+    rs_window: 126
+    min_bars_long: 200
+    benchmarks: {}              # market -> index symbol, e.g. {IN: "NIFTY 50"}
+    sector_index: {}            # sector name -> index symbol
+  levels: {pivot_window: 5, cluster_tolerance_pct: 1.5, max_levels: 3, gap_min_pct: 1, max_gap_zones: 3}
+  regime: {risk_on_breadth_pct: 60, risk_off_breadth_pct: 40, min_breadth_universe: 20}
+  setups:
+    pullback_atr_band: 1
+    breakout_volume_mult: 1.5
+    rsi_trend_min: 50
+    rsi_trend_max: 70
+    base_lookback: 40
+    base_atr_pct_max: 3
+    stop_atr_mult: 2
+    precedence: [breakout, pullback, trend_continuation, base, downtrend, none]
+  fa:
+    financial_sectors: [Banks, Financial Services, Finance, NBFC, Insurance]
+    default_tax_rate_pct: 25
+    growth_years: 3
+  valuation:
+    history_years: [5, 10]
+    min_obs: 24
+    min_peers: 3
+    dcf:
+      horizon_years: 10
+      base: {growth_pct: 8, discount_pct: 12, terminal_growth_pct: 3}
+      bull: {growth_pct: 12, discount_pct: 11, terminal_growth_pct: 4}
+      bear: {growth_pct: 4, discount_pct: 14, terminal_growth_pct: 2}
+    peer_overrides: {}          # symbol -> [peer symbols]
+  flags:
+    pledge_pct: 20
+    pledge_rising_quarters: 2
+    cfo_to_pat_min: 0.5
+    cfo_to_pat_years: 3
+    receivable_days_rise_pct: 30
+    dilution_pct_per_year: 5
+    contingent_pct_of_net_worth: 20
+    auditor_lookback_days: 730
+    severity:
+      pledge_high_and_rising: hard
+      pledge_high: soft
+      pledge_rising: soft
+      auditor_change: soft
+      cfo_to_pat: hard
+      receivable_days: soft
+      dilution: soft
+      contingent_liabilities: hard
+  xray:
+    asset_class_map: {equity: equity, etf: equity, bond: debt}
+    mf_category_map: {Equity: equity, Debt: debt, Liquid: debt}
+    market_cap: {}              # market -> {large_min: .., mid_min: ..}; empty: unclassified
+    top_n: [5, 10]
+  risk: {lookback_days: 252, drawdown_years: [1, 3], participation_pct: 10, adv_days: 20, min_overlap_days: 60}
+  screen: {max_universe: 5000, max_rules: 50}
+  scoring:
+    weights_version: pid-15.5-v1
+    weights:
+      long_term: {quality: 30, value: 25, growth: 25, momentum: 10, risk: 10}
+      positional: {quality: 15, value: 10, growth: 20, momentum: 45, risk: 10}
+    top_band_min: 75
+    upper_band_min: 60
+    hold_band_min: 40
+    support_floor: 50
+    valuation_penalty_over_pct: 90
+    valuation_penalty_points: 25
+    min_input_pct: 70
+    min_peers_for_sector: 5
+    flag_penalty_hard: 50
+    flag_penalty_soft: 20
+    setup_quality: {breakout: 90, pullback: 80, trend_continuation: 70, base: 50, downtrend: 0, none: 30}

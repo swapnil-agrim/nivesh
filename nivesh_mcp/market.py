@@ -11,7 +11,7 @@ from nivesh_adapters.market_ingest import calendar_for
 from nivesh_core.market_models import PriceBar
 from nivesh_core.market_store import get_bars, get_corp_actions
 from nivesh_core.security_master import SecurityMaster, SecurityRow
-from nivesh_engine.adjust import adjust_closes
+from nivesh_engine.adjust import split_adjusted_map
 from nivesh_engine.calendar import last_trading_day
 from nivesh_mcp import common
 from nivesh_mcp.base import ReadOnlyServer
@@ -93,12 +93,7 @@ def get_index(name: str, start: str, end: str, limit: int = 500, cursor: int = 0
 def _split_adjusted(bars: list[PriceBar], actions: list[Any]) -> dict[Any, Any]:
     """Date -> split-adjusted close. Exchange closes are raw, so they are adjusted by the stored
     splits and bonuses; Yahoo closes already are, so they are left alone (never counted twice)."""
-    out: dict[Any, Any] = {}
-    for source in {b.source for b in bars}:
-        mine = [b for b in bars if b.source == source]
-        for b in adjust_closes(mine, actions, dividends=False, splits=source != "yahoo"):
-            out[b.date] = b.adj_close
-    return out
+    return split_adjusted_map(bars, actions)
 
 
 @server.tool

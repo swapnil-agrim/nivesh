@@ -149,6 +149,68 @@ def get_corp_actions(
     return acts
 
 
+# Bulk reads for the analysis engines (one statement per chunk of ids, never one per security) ----
+
+CHUNK = 500
+
+
+def _chunks(ids: Sequence[int]) -> list[list[int]]:
+    unique = sorted(set(ids))
+    return [unique[i : i + CHUNK] for i in range(0, len(unique), CHUNK)]
+
+
+def _marks(chunk: Sequence[int]) -> str:
+    return ", ".join("?" * len(chunk))
+
+
+def get_bars_many(
+    conn: duckdb.DuckDBPyConnection,
+    security_ids: Sequence[int],
+    start: date | None = None,
+    end: date | None = None,
+) -> dict[int, list[PriceBar]]:
+    """`get_bars` for many securities: one bar per date (best-ranked source), oldest first. Every
+    requested id is present; a security with no bars maps to an empty list."""
+    best: dict[int, dict[date, PriceBar]] = {i: {} for i in security_ids}
+    for chunk in _chunks(security_ids):
+        rows = conn.execute(
+            f"SELECT {_BAR_COLS} FROM price_bar WHERE security_id IN ({_marks(chunk)}) "  # noqa: S608
+            "AND date >= COALESCE(?, DATE '0001-01-01') AND date <= COALESCE(?, DATE '9999-12-31') "
+            "ORDER BY security_id, date",
+            (*chunk, start, end),
+        ).fetchall()
+        for r in rows:
+            b = _bar(r)
+            mine = best[b.security_id]
+            cur = mine.get(b.date)
+            if cur is None or _rank(b.source) < _rank(cur.source):
+                mine[b.date] = b
+    return {i: [m[d] for d in sorted(m)] for i, m in best.items()}
+
+
+def get_corp_actions_many(
+    conn: duckdb.DuckDBPyConnection, security_ids: Sequence[int], since: date | None = None
+) -> dict[int, list[CorpAction]]:
+    """`get_corp_actions` for many securities (same order within each)."""
+    out: dict[int, list[CorpAction]] = {i: [] for i in security_ids}
+    for chunk in _chunks(security_ids):
+        rows = conn.execute(
+            "SELECT security_id, ex_date, kind, ratio, amount, source FROM corp_action "  # noqa: S608
+            f"WHERE security_id IN ({_marks(chunk)}) "
+            "AND ex_date >= COALESCE(?, DATE '0001-01-01') ORDER BY security_id, ex_date, source",
+            (*chunk, since),
+        ).fetchall()
+        for r in rows:
+            out[r[0]].append(
+                CorpAction(
+                    security_id=r[0], ex_date=r[1], kind=r[2], ratio=r[3], amount=r[4], source=r[5]
+                )  # fmt: skip
+            )
+    for acts in out.values():
+        acts.sort(key=lambda a: (a.ex_date, _rank(a.source)))
+    return out
+
+
 # Fundamentals and shareholding -----------------------------------------------------------------
 
 
@@ -214,6 +276,62 @@ def get_shareholding(conn: duckdb.DuckDBPyConnection, security_id: int) -> list[
                         public_pct=r[3], filed_at=r[4])
         for r in rows
     ]  # fmt: skip
+
+
+def get_statement_rows_many(
+    conn: duckdb.DuckDBPyConnection, security_ids: Sequence[int], as_of: date | None = None
+) -> dict[int, list[StatementRow]]:
+    """`get_statement_rows` for many securities: every `filed_at` version, restricted to rows
+    filed on or before `as_of` when given (no look-ahead)."""
+    out: dict[int, list[StatementRow]] = {i: [] for i in security_ids}
+    for chunk in _chunks(security_ids):
+        rows = conn.execute(
+            "SELECT security_id, period_end, period_type, item, value, currency, filed_at "  # noqa: S608
+            f"FROM fundamental WHERE security_id IN ({_marks(chunk)}) "
+            "AND filed_at <= COALESCE(?, DATE '9999-12-31') "
+            "ORDER BY security_id, period_end, item, filed_at",
+            (*chunk, as_of),
+        ).fetchall()
+        for r in rows:
+            out[r[0]].append(
+                StatementRow(
+                    period_end=r[1],
+                    period_type=r[2],
+                    item=r[3],
+                    value=r[4],
+                    currency=r[5] or "",
+                    filed_at=r[6],
+                )  # fmt: skip
+            )
+    return out
+
+
+def get_shareholding_many(
+    conn: duckdb.DuckDBPyConnection, security_ids: Sequence[int], as_of: date | None = None
+) -> dict[int, list[ShareholdingRow]]:
+    """`get_shareholding` for many securities. `as_of` filters filings BEFORE the latest-per-quarter
+    pick, so a restatement filed after `as_of` never hides the filing that existed on it."""
+    out: dict[int, list[ShareholdingRow]] = {i: [] for i in security_ids}
+    for chunk in _chunks(security_ids):
+        rows = conn.execute(
+            "SELECT security_id, period_end, promoter_pct, promoter_pledged_pct, public_pct, "  # noqa: S608
+            f"filed_at FROM shareholding WHERE security_id IN ({_marks(chunk)}) "
+            "AND filed_at <= COALESCE(?, DATE '9999-12-31') "
+            "QUALIFY row_number() OVER (PARTITION BY security_id, period_end "
+            "ORDER BY filed_at DESC) = 1 ORDER BY security_id, period_end",
+            (*chunk, as_of),
+        ).fetchall()
+        for r in rows:
+            out[r[0]].append(
+                ShareholdingRow(
+                    period_end=r[1],
+                    promoter_pct=r[2],
+                    promoter_pledged_pct=r[3],
+                    public_pct=r[4],
+                    filed_at=r[5],
+                )  # fmt: skip
+            )
+    return out
 
 
 # Filings ---------------------------------------------------------------------------------------
@@ -401,6 +519,42 @@ def latest_estimates(conn: duckdb.DuckDBPyConnection, security_id: int) -> list[
     return [EstimateRow(*r) for r in rows]
 
 
+def latest_estimates_many(
+    conn: duckdb.DuckDBPyConnection, security_ids: Sequence[int], as_of: date | None = None
+) -> dict[int, list[EstimateRow]]:
+    """`latest_estimates` for many securities (newest snapshot on or before `as_of`)."""
+    out: dict[int, list[EstimateRow]] = {i: [] for i in security_ids}
+    for chunk in _chunks(security_ids):
+        rows = conn.execute(
+            "SELECT security_id, metric, period, value, as_of, source FROM estimate "  # noqa: S608
+            f"WHERE security_id IN ({_marks(chunk)}) "
+            "AND as_of <= COALESCE(?, DATE '9999-12-31') "
+            "QUALIFY row_number() OVER (PARTITION BY security_id, metric, period "
+            "ORDER BY as_of DESC) = 1 ORDER BY security_id, period, metric",
+            (*chunk, as_of),
+        ).fetchall()
+        for r in rows:
+            out[r[0]].append(EstimateRow(*r))
+    return out
+
+
+def estimate_history_many(
+    conn: duckdb.DuckDBPyConnection, security_ids: Sequence[int], since: date, until: date
+) -> dict[int, list[EstimateRow]]:
+    """Every estimate snapshot dated from `since` to `until`, oldest first, for many securities."""
+    out: dict[int, list[EstimateRow]] = {i: [] for i in security_ids}
+    for chunk in _chunks(security_ids):
+        rows = conn.execute(
+            "SELECT security_id, metric, period, value, as_of, source FROM estimate "  # noqa: S608
+            f"WHERE security_id IN ({_marks(chunk)}) AND as_of >= ? AND as_of <= ? "
+            "ORDER BY security_id, as_of, period, metric",
+            (*chunk, since, until),
+        ).fetchall()
+        for r in rows:
+            out[r[0]].append(EstimateRow(*r))
+    return out
+
+
 def write_events(
     conn: duckdb.DuckDBPyConnection,
     events: Sequence[tuple[int, str, date]],
@@ -501,3 +655,38 @@ def get_news(
         )
         for r in rows
     ]  # fmt: skip
+
+
+@dataclass(frozen=True)
+class FilingItems:
+    """A stored filing with the names of its stored sections."""
+
+    filing_id: int
+    filed_at: date
+    sections: tuple[str, ...]
+
+
+def filing_items_many(
+    conn: duckdb.DuckDBPyConnection,
+    security_ids: Sequence[int],
+    forms: Sequence[str],
+    since: date,
+    until: date,
+) -> dict[int, list[FilingItems]]:
+    """Filings of the given forms (amendments included) filed from `since` to `until`, that have
+    at least one stored section, newest first, for many securities in one statement per chunk."""
+    out: dict[int, list[FilingItems]] = {i: [] for i in security_ids}
+    wanted = [*forms, *(f"{f}/A" for f in forms)]
+    for chunk in _chunks(security_ids):
+        rows = conn.execute(
+            "SELECT f.security_id, f.id, f.filed_at, list(s.section ORDER BY s.section) "  # noqa: S608
+            "FROM filing f JOIN filing_section s ON s.filing_id = f.id "
+            f"WHERE f.security_id IN ({_marks(chunk)}) AND f.form IN ({_marks(wanted)}) "  # type: ignore[arg-type]
+            "AND f.filed_at >= ? AND f.filed_at <= ? "
+            "GROUP BY f.security_id, f.id, f.filed_at "
+            "ORDER BY f.security_id, f.filed_at DESC, f.id DESC",
+            (*chunk, *wanted, since, until),
+        ).fetchall()
+        for sid, fid, filed, names in rows:
+            out[sid].append(FilingItems(int(fid), filed, tuple(names)))
+    return out

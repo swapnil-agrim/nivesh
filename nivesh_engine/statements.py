@@ -38,6 +38,22 @@ CONCEPTS: dict[str, tuple[str, ...]] = {
     "total_debt": ("LongTermDebt", "LongTermDebtNoncurrent"),
     "total_equity": ("StockholdersEquity",),
     "shares_out": ("EntityCommonStockSharesOutstanding", "CommonStockSharesOutstanding"),
+    # additive vocabulary for the analysis engines (ST-6.3)
+    "gross_profit": ("GrossProfit",),
+    "depreciation_amortization": ("DepreciationDepletionAndAmortization",),
+    "interest_expense": ("InterestExpense",),
+    "cash": ("CashAndCashEquivalentsAtCarryingValue",),
+    "current_assets": ("AssetsCurrent",),
+    "current_liabilities": ("LiabilitiesCurrent",),
+    "receivables": ("AccountsReceivableNetCurrent",),
+    "payables": ("AccountsPayableCurrent",),
+    "inventory": ("InventoryNet",),
+    "total_assets": ("Assets",),
+    "income_tax": ("IncomeTaxExpenseBenefit",),
+    "pretax_income": (
+        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+    ),
+    "dividends_per_share": ("CommonStockDividendsPerShareDeclared",),
 }
 COVER_CONCEPTS = {"EntityCommonStockSharesOutstanding"}  # dei: dated at the cover, not a period
 _RANK = {c: (item, i) for item, cs in CONCEPTS.items() for i, c in enumerate(cs)}
