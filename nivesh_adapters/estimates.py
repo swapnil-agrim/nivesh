@@ -23,10 +23,10 @@ BASE = "https://financialmodelingprep.com/api/v3"
 FIELDS = {"revenue": "estimatedRevenueAvg", "eps": "estimatedEpsAvg"}
 
 
-@dataclass(frozen=True)
 _QKEY = "api" + "key"
 
 
+@dataclass(frozen=True)
 class EstimatePoint:
     metric: str
     period: str  # fiscal year end, ISO date
