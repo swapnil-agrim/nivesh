@@ -189,3 +189,50 @@ def test_feed_url_must_be_https(tmp_path: Path) -> None:
 def test_macro_role_names_are_closed(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="macro_series"):
         load_settings(write(tmp_path, "market: {macro_series: {bogus: {source: fred, id: X}}}\n"))
+
+
+def test_tax_block_defaults_none_and_must_be_positive(tmp_path: Path) -> None:
+    assert load_settings(write(tmp_path, "data_dir: x\n")).tax.us_long_term_days is None
+    ok = load_settings(write(tmp_path, "tax: {us_long_term_days: 365}\n"))
+    assert ok.tax.us_long_term_days == 365
+    for bad in ("0", "-5", "abc"):
+        with pytest.raises(ConfigError):
+            load_settings(write(tmp_path, f"tax: {{us_long_term_days: {bad}}}\n"))
+    with pytest.raises(ConfigError):
+        load_settings(write(tmp_path, "tax: {rate: 0.2}\n"))
+
+
+def test_sample_config_sets_tax_param_and_loads() -> None:
+    s = load_settings(ROOT / "config" / "nivesh.yaml")
+    assert s.tax.us_long_term_days == 365
+    assert "gives no tax advice" in (ROOT / "config" / "nivesh.yaml").read_text()
+
+
+def test_us_broker_defaults_and_https_url(tmp_path: Path) -> None:
+    ub = load_settings(write(tmp_path, "data_dir: x\n")).us_broker
+    assert ub.alpaca_key == "ref:ALPACA_KEY" and ub.alpaca_secret == "ref:ALPACA_SECRET"
+    assert ub.base_url.startswith("https://")
+    with pytest.raises(ConfigError, match="https"):
+        load_settings(write(tmp_path, "us_broker: {base_url: http://x.test}\n"))
+    ok = load_settings(write(tmp_path, "us_broker: {base_url: 'https://x.test/'}\n"))
+    assert ok.us_broker.base_url == "https://x.test"
+
+
+def test_us_broker_fields_must_be_refs(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError):
+        load_settings(write(tmp_path, "us_broker: {alpaca_key: not-a-ref}\n"))
+
+
+def test_literal_alpaca_secret_rejected_without_echoing_value(tmp_path: Path) -> None:
+    value = "test-" + "alpaca-" + "sec"
+    with pytest.raises(ConfigError) as ei:
+        load_settings(write(tmp_path, f"us_broker: {{alpaca_secret: {value}}}\n"))
+    assert value not in str(ei.value) and "us_broker.alpaca_secret" in str(ei.value)
+    with pytest.raises(ConfigError) as ei:
+        load_settings(write(tmp_path, f"us_broker: {{alpaca_key: {value}}}\n"))
+    assert value not in str(ei.value)
+
+
+def test_sample_config_loads_with_us_broker_block() -> None:
+    s = load_settings(ROOT / "config" / "nivesh.yaml")
+    assert s.us_broker.alpaca_key == "ref:ALPACA_KEY"

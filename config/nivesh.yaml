@@ -18,6 +18,18 @@ investright:
   api_secret: ref:INVESTRIGHT_API_SECRET
   # demat_ref: <holder_ref printed by `nivesh ingest` for the demat linked to InvestRight>
 
+# E3 US broker (read-only positions/account). Secrets stay in the keychain: `nivesh secrets set
+# ALPACA_KEY` and `nivesh secrets set ALPACA_SECRET`. base_url is per spec, unverified.
+us_broker:
+  base_url: https://paper-api.alpaca.markets
+  alpaca_key: ref:ALPACA_KEY
+  alpaca_secret: ref:ALPACA_SECRET
+
+# E3 tax parameter: owner-set, example only; Nivesh gives no tax advice. It only drives an
+# informational long-term flag on US lots (days held >= this value). Unset means no flag.
+tax:
+  us_long_term_days: 365
+
 # E4 market data. Secrets are refs; the EDGAR contact is read only from the secret EDGAR_CONTACT.
 # Series ids, feed urls and wire formats are per spec, unverified against live sources.
 market:

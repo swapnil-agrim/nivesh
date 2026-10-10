@@ -1,0 +1,18 @@
+[
+  {"asset_id": "asset-sample-1", "symbol": "AAPL", "exchange": "NASDAQ", "asset_class": "us_equity",
+   "qty": "10", "avg_entry_price": "150.25", "current_price": "190.00", "side": "long",
+   "market_value": "1900.00"},
+  {"asset_id": "asset-sample-2", "symbol": "SPYX", "exchange": "ARCA", "asset_class": "us_equity",
+   "qty": "4.5", "avg_entry_price": "92.10", "current_price": "", "side": "long"},
+  {"asset_id": "asset-sample-3", "symbol": "SHRT", "exchange": "NYSE", "asset_class": "us_equity",
+   "qty": "-3", "avg_entry_price": "20.00", "current_price": "19.00", "side": "short"},
+  {"asset_id": "asset-sample-4", "symbol": "COINX", "exchange": "CRYPTO", "asset_class": "crypto",
+   "qty": "1", "avg_entry_price": "100.00", "current_price": "110.00", "side": "long"},
+  {"asset_id": "asset-sample-5", "symbol": "OTCX", "exchange": "OTC", "asset_class": "us_equity",
+   "qty": "2", "avg_entry_price": "1.00", "current_price": "1.10", "side": "long"},
+  {"asset_id": "asset-sample-6", "symbol": "bad symbol!", "exchange": "NYSE",
+   "asset_class": "us_equity", "qty": "1", "avg_entry_price": "1.00", "current_price": "1.10",
+   "side": "long"},
+  {"asset_id": "asset-sample-7", "symbol": "AMEXCO", "exchange": "AMEX", "asset_class": "us_equity",
+   "qty": "2", "avg_entry_price": "5.00", "current_price": "5.50", "side": "long"}
+]

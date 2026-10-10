@@ -6,7 +6,9 @@ from typing import Any
 
 from nivesh_core.holdings import Holding
 from nivesh_engine.consolidate import consolidate, reconcile
+from nivesh_engine.fx import FxResult, rate_on_or_before
 from tests.holdings_fx import ISIN_A, ISIN_B, D, holding
+from tests.us_fx import usd_holding, usdinr_obs
 
 
 def hold(source: str, **kw: object) -> object:
@@ -276,3 +278,122 @@ def test_latest_view_feeds_consolidation_end_to_end(tmp_path: Path) -> None:
     assert [(i.isin, i.investright_quantity, i.cas_quantity) for i in c.reconciliation] == [
         (ISIN_A, D(10), D(8))
     ]
+
+
+# ---- E3: USD rows, FX conversion and INR vs USD exposure ---------------------------------------
+def fx_at(rate: str = "80", on: str = "2026-01-05") -> FxResult:
+    return rate_on_or_before(usdinr_obs((on, rate)), date(2026, 1, 5), "fred:DEXINUS")
+
+
+NO_FX = rate_on_or_before([], date(2026, 1, 5), "fred:DEXINUS")
+
+
+def test_usd_rows_converted_at_valuation_rate_and_totalled_in_inr() -> None:
+    c = consolidate([holding(), usd_holding(quantity=D(10), price=D(10))], fx=fx_at())
+    usd = next(r for r in c.rows if r.currency == "USD")
+    assert usd.value_inr == D(8000) and usd.value_native == D(100) and usd.price == D(10)
+    assert c.total_value == D(1200) + D(8000)
+    assert c.fx is not None and c.fx.rate == D(80)
+
+
+def test_total_currency_never_mixes_usd_into_inr_sums() -> None:
+    rows = [holding(quantity=D(10), price=D(100)), usd_holding(quantity=D(1), price=D(10))]
+    assert consolidate(rows, fx=fx_at()).total_value == D(1800)
+    assert consolidate(rows).total_value == D(1000)  # no fx: USD is not added at 1:1
+    assert consolidate(rows, fx=NO_FX).total_value == D(1000)
+
+
+def test_missing_rate_marks_usd_rows_unavailable_with_note_and_excludes_them_from_weights() -> None:
+    c = consolidate([holding(), usd_holding()], fx=NO_FX)
+    usd = next(r for r in c.rows if r.currency == "USD")
+    inr = next(r for r in c.rows if r.currency == "INR")
+    assert usd.value_inr is None and usd.weight is None
+    assert inr.weight == D(1)
+    assert any("1 USD holding(s) excluded" in n and "no USDINR observation" in n for n in c.notes)
+
+
+def test_unavailable_never_zero() -> None:
+    c = consolidate([usd_holding()], fx=NO_FX)
+    assert c.rows[0].value_inr is None and c.total_value == D(0)
+    assert c.invested == D(0) and c.pnl == D(0)
+
+
+def test_exposure_inr_vs_usd_percent_sums_to_100() -> None:
+    rows = [holding(quantity=D(10), price=D(100)), usd_holding(quantity=D(1), price=D(10))]
+    c = consolidate(rows, fx=fx_at())
+    by = {e.currency: e for e in c.exposure}
+    assert by["INR"].value_inr == D(1000) and by["USD"].value_inr == D(800)
+    assert by["USD"].value_native == D(10)
+    total = (by["INR"].pct or D(0)) + (by["USD"].pct or D(0))
+    assert total == D(100) and by["USD"].pct is not None
+    assert by["INR"].available and by["USD"].available
+
+
+def test_exposure_usd_unavailable_has_no_pct() -> None:
+    c = consolidate([holding(), usd_holding()], fx=NO_FX)
+    by = {e.currency: e for e in c.exposure}
+    assert by["USD"].pct is None and not by["USD"].available and by["USD"].value_inr is None
+    assert by["USD"].value_native == D(1000)
+    assert by["INR"].pct is None and by["INR"].value_inr == D(1200)
+
+
+def test_no_usd_rows_means_no_fx_block_and_unchanged_output() -> None:
+    c = consolidate([holding()], fx=fx_at())
+    assert c.fx is None and c.exposure == []
+    assert c.rows[0].currency == "INR" and c.rows[0].value_native is None
+
+
+def test_merge_keeps_native_price_for_usd_rows() -> None:
+    rows = [
+        usd_holding(quantity=D(10), price=D(100)),
+        usd_holding(quantity=D(10), price=D(120)),
+    ]
+    (r,) = consolidate(rows, fx=fx_at()).rows
+    assert r.quantity == D(20) and r.price == D(110) and r.value_inr == D(20 * 110 * 80)
+
+
+def test_same_ticker_alpaca_and_us_csv_dedupes_by_symbol_currency_key_with_alpaca_precedence() -> (
+    None
+):
+    rows = [
+        usd_holding(source="us_csv", exchange="NASDAQ", quantity=D(5), price=D(100)),
+        usd_holding(
+            source="alpaca",
+            exchange="NYSE",
+            quantity=D(6),
+            price=D(200),
+            price_basis="ltp",
+            source_label="Alpaca",
+        ),
+    ]
+    c = consolidate(rows, fx=fx_at())
+    (r,) = c.rows
+    assert r.key == "AAPL:USD" and r.source == "alpaca" and r.sources == ["alpaca", "us_csv"]
+    assert r.quantity == D(6) and r.avg_cost == D(100)
+
+
+def test_source_coverage_labels_alpaca_and_us_csv() -> None:
+    rows = [
+        usd_holding(source="us_csv"),
+        usd_holding(symbol="MSFT", source="alpaca", source_label="Alpaca", price_basis="ltp"),
+    ]
+    c = consolidate(rows, fx=fx_at())
+    assert [s.source for s in c.coverage] == ["alpaca", "us_csv"]
+    assert sum(s.share for s in c.coverage) == D(1)
+
+
+def test_cost_basis_converted_at_valuation_rate_note_present() -> None:
+    c = consolidate([usd_holding(quantity=D(10), avg_cost=D(5), price=D(8))], fx=fx_at())
+    assert c.invested == D(10 * 5 * 80) and c.pnl == D(10 * 8 * 80 - 10 * 5 * 80)
+    assert any("valuation-date rate" in n and "FX gain" in n for n in c.notes)
+
+
+def test_rows_sorted_with_unavailable_last() -> None:
+    rows = [usd_holding(), holding(quantity=D(1), price=D(1))]
+    c = consolidate(rows, fx=NO_FX)
+    assert [r.currency for r in c.rows] == ["INR", "USD"]
+
+
+def test_book_value_note_counts_us_csv_rows() -> None:
+    c = consolidate([usd_holding(), usd_holding(symbol="MSFT")], fx=fx_at())
+    assert any(n.startswith("2 CSV holding(s) are valued at average cost") for n in c.notes)

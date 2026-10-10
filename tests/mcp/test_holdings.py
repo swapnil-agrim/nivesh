@@ -23,7 +23,7 @@ from tests.holdings_fx import ISIN_A, ISIN_B, D, fixture_http, holding, txn
 ROOT = Path(__file__).resolve().parents[2]
 TOOLS = [
     "session_status", "get_holdings", "get_positions", "get_funds", "combined_portfolio",
-    "get_transactions", "read_cas_statement",
+    "get_transactions", "read_cas_statement", "get_lots",
 ]  # fmt: skip
 Env = tuple[list[str], Path]
 NOW = datetime(2026, 1, 5, 6, 0, tzinfo=UTC)
@@ -79,7 +79,7 @@ def login(data: Path, hour: int = 6) -> None:
     )
 
 
-def test_registry_exposes_the_seven_holdings_tools() -> None:
+def test_registry_exposes_the_eight_holdings_tools() -> None:
     assert sorted(SERVERS["holdings"].tool_names) == sorted(TOOLS)
 
 

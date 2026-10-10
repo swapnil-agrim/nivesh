@@ -5,10 +5,13 @@ import webbrowser
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import typer
 
+from nivesh_adapters.alpaca import AlpacaClient, normalise_positions
 from nivesh_adapters.cas_ingest import ingest_inbox
 from nivesh_adapters.csv_import import convert_preset, import_csv
+from nivesh_adapters.csv_import_us import convert_us_preset, import_us_csv
 from nivesh_adapters.investright import InvestRightClient
 from nivesh_adapters.investright_normalise import ltp_map, normalise_holdings
 from nivesh_adapters.investright_session import (
@@ -27,7 +30,7 @@ from nivesh_core.holder_ref import get_salt
 from nivesh_core.holdings_store import ingest_exists, save_ingest
 from nivesh_core.paths import ensure_data_dir, private_umask
 from nivesh_core.secrets import SecretRef
-from nivesh_core.security_resolver import TableResolver
+from nivesh_core.security_resolver import TableResolver, UsSymbolResolver
 from nivesh_core.timeutil import ist_date, utcnow
 
 holdings_app = typer.Typer()
@@ -109,6 +112,41 @@ def sync(
     typer.echo(f"synced {report.holdings} holdings ({unresolved} unresolved ISINs) as of {today}")
 
 
+def _alpaca_http() -> httpx.Client | None:
+    """The HTTP client for the US broker; None means the recorder's default (tests replace this)."""
+    return None
+
+
+@holdings_app.command("sync-us")
+def sync_us(ctx: typer.Context) -> None:
+    """Fetch Alpaca positions (read-only) and store them as USD holdings."""
+    settings = settings_of(ctx)
+    ub = settings.us_broker
+    data_dir = Path(settings.data_dir)
+    with user_errors():
+        client = AlpacaClient(
+            ub.base_url, secret_or_hint(ub.alpaca_key), secret_or_hint(ub.alpaca_secret),
+            _alpaca_http(),
+        )  # fmt: skip
+        if client.account().data.get("currency") != "USD":
+            raise NiveshError("the Alpaca account currency is not USD; only USD is supported")
+        rows = client.positions().data
+        today = ist_date(utcnow())
+        init_stores(data_dir)
+        conn = open_sqlite(data_dir / "nivesh.sqlite")
+        try:
+            found, warnings = normalise_positions(rows, UsSymbolResolver(conn), today)
+            report = save_ingest(
+                conn, kind="alpaca", source_label="sync", digest=None, as_of=today,
+                holdings=found, txns=[], holder_refs=[], warnings=warnings,
+            )  # fmt: skip
+        finally:
+            conn.close()
+    typer.echo(f"synced {report.holdings} US holdings (Alpaca) as of {today}")
+    for w in warnings:
+        typer.echo(f"  warning: {w}")
+
+
 @holdings_app.command()
 def ingest(ctx: typer.Context) -> None:
     """Ingest CAS PDFs from <data_dir>/inbox (password and salt come from the keychain)."""
@@ -152,16 +190,25 @@ def ingest(ctx: typer.Context) -> None:
 def import_csv_cmd(
     ctx: typer.Context,
     path: Annotated[Path, typer.Argument(help="CSV in the holdings template layout.")],
-    preset: Annotated[str | None, typer.Option(help="zerodha | groww | upstox export.")] = None,
+    preset: Annotated[
+        str | None,
+        typer.Option(help="in: zerodha | groww | upstox; us: alpaca | robinhood export."),
+    ] = None,
     label: Annotated[
         str | None, typer.Option(help="Account label (required with --preset).")
     ] = None,
+    market: Annotated[str, typer.Option(help="in (default) or us (USD holdings).")] = "in",
 ) -> None:
     """Import holdings for accounts the other sources do not cover; all-or-nothing."""
     data_dir = Path(settings_of(ctx).data_dir)
     with user_errors():
+        if market not in ("in", "us"):
+            raise NiveshError("--market must be in or us")
         if not path.is_file():
             raise NiveshError("file not found")
+        if market == "us":
+            _import_us(data_dir, path, preset, label)
+            return
         if preset and not label:
             raise NiveshError("--label is required with --preset")
         raw = path.read_bytes()
@@ -189,3 +236,36 @@ def import_csv_cmd(
             conn.close()
     accounts = len({h.source_label for h in result.holdings})
     typer.echo(f"imported {len(result.holdings)} holdings into {accounts} account(s)")
+
+
+def _import_us(data_dir: Path, path: Path, preset: str | None, label: str | None) -> None:
+    if preset and not label:
+        raise NiveshError("--label is required with --preset")
+    raw = path.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    text = raw.decode("utf-8", errors="replace")
+    if preset and label:
+        text = convert_us_preset(text, preset, label)
+    init_stores(data_dir)
+    conn = open_sqlite(data_dir / "nivesh.sqlite")
+    try:
+        if ingest_exists(conn, "us_csv", digest):
+            typer.echo("already imported (same file content); nothing to do")
+            return
+        today = ist_date(utcnow())
+        result = import_us_csv(text, UsSymbolResolver(conn), today)
+        if result.errors:
+            for err in result.errors:
+                typer.echo(str(err), err=True)
+            raise NiveshError(f"{len(result.errors)} invalid row(s); nothing was imported")
+        save_ingest(
+            conn, kind="us_csv", source_label=digest[:8], digest=digest, as_of=today,
+            holdings=result.holdings, txns=[], holder_refs=[], warnings=[], lots=result.lots,
+        )  # fmt: skip
+    finally:
+        conn.close()
+    accounts = len({h.source_label for h in result.holdings})
+    typer.echo(
+        f"imported {len(result.holdings)} holdings and {len(result.lots)} lots "
+        f"into {accounts} account(s)"
+    )

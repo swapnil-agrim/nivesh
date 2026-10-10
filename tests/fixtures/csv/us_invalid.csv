@@ -1,0 +1,13 @@
+account_label,symbol,exchange,quantity,avg_cost,currency,asset_class,acquired_on
+US Broker,AAPL,NASDAQ,10,150.25,USD,equity,2025-03-14
+US Broker,bad symbol!,NASDAQ,1,10,USD,equity,
+US Broker,MSFT,NASDAQ,abc,10,USD,equity,
+US Broker,MSFT,NASDAQ,1,-5,USD,equity,
+US Broker,MSFT,NASDAQ,1,,USD,equity,
+US Broker,MSFT,NASDAQ,1,10,EUR,equity,
+US Broker,MSFT,NASDAQ,1,10,USD,bond,
+US Broker,MSFT,NASDAQ,1,10,USD,equity,2025-13-45
+US Broker,MSFT,NASDAQ,1,10,USD,equity,2999-01-01
+US Broker,LSEX,LSE,1,10,USD,equity,
+,MSFT,NASDAQ,1,10,USD,equity,
+US Broker,NOEXCH,,1,10,USD,equity,

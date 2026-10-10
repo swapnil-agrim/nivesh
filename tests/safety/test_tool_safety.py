@@ -124,7 +124,7 @@ def discover_adapter_classes() -> list[type]:
         m = importlib.import_module(f"nivesh_adapters.{mod.name}")
         for obj in vars(m).values():
             if isinstance(obj, type) and obj.__module__ == m.__name__:
-                if issubclass(obj, Adapter) or obj.__name__.endswith(("Client", "Broker")):
+                if issubclass(obj, Adapter) or obj.__name__.endswith(("Client", "Broker", "Proxy")):
                     found.append(obj)
     return found
 
@@ -151,7 +151,7 @@ def test_holdings_server_has_no_write_tool_and_no_write_words_in_descriptions() 
     from nivesh_mcp.base import _desc_write_words
 
     srv = SERVERS["holdings"]
-    assert len(srv.tool_names) == 7
+    assert len(srv.tool_names) == 8
     for tool in srv.tool_names:
         assert not is_write_name(tool), tool
         assert _desc_write_words(srv.tool_docs[tool]) == [], tool
@@ -199,3 +199,46 @@ def test_market_modules_use_no_write_verbs_in_names_or_docstrings() -> None:
                 from nivesh_mcp.base import _desc_write_words
 
                 assert _desc_write_words(doc) == [], (mod, node.name)
+
+
+def test_safety_discovery_finds_alpaca_client_and_read_only_proxy() -> None:
+    names = {c.__name__ for c in discover_adapter_classes()}
+    assert {"AlpacaClient", "ReadOnlyProxy", "InvestRightClient"} <= names
+
+
+def test_alpaca_client_and_proxy_have_no_write_methods() -> None:
+    from nivesh_adapters.alpaca import AlpacaClient
+    from nivesh_adapters.broker_proxy import ReadOnlyProxy
+
+    assert write_methods(AlpacaClient) == [] and write_methods(ReadOnlyProxy) == []
+    assert {n for n in dir(AlpacaClient) if not n.startswith("_")} >= {"positions", "account"}
+
+
+def test_proxy_allow_list_in_use_has_no_write_name() -> None:
+    from nivesh_adapters.broker_proxy import DEFAULT_ALLOW
+
+    assert DEFAULT_ALLOW and not [t for t in DEFAULT_ALLOW if is_write_name(t)]
+
+
+def test_market_adapters_set_unchanged() -> None:
+    found = {c.__name__ for c in discover_adapter_classes()}
+    assert MARKET_ADAPTERS <= found
+
+
+def test_us_holdings_modules_use_no_write_verbs_in_names_or_docstrings() -> None:
+    import ast
+
+    from nivesh_mcp.base import _desc_write_words
+
+    mods = [
+        "nivesh_adapters/alpaca.py", "nivesh_adapters/broker_proxy.py",
+        "nivesh_adapters/csv_import_us.py", "nivesh_engine/fx.py", "nivesh_engine/returns.py",
+        "nivesh_mcp/holdings.py",
+    ]  # fmt: skip
+    for mod in mods:
+        tree = ast.parse((ROOT / mod).read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                assert not is_write_name(node.name), (mod, node.name)
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Module):
+                assert _desc_write_words(ast.get_docstring(node) or "") == [], (mod, node)

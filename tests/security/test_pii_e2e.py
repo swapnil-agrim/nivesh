@@ -1,7 +1,9 @@
 """PII never reaches tool output, recorded fixtures or error text (NFR-3). Run nightly too."""
 
 import json
+import re
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -221,3 +223,80 @@ async def test_market_pipeline_leaves_no_pii_anywhere(
     blob = str(duck.execute("select payload, params_hash from cache_entry").fetchall())
     duck.close()
     assert not any(s in blob for s in secrets_)
+
+
+async def test_us_holdings_pipeline_leaves_no_pii_anywhere(
+    cli_env: tuple[list[str], Path], fake_keyring: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """US CSV + Alpaca fixture -> stores -> CLI output -> MCP payloads are scan-clean, and the
+    dummy broker credentials appear in none of them."""
+    import keyring
+    from typer.testing import CliRunner
+
+    import nivesh_cli.holdings as ch
+    import nivesh_mcp.holdings as mh
+    from nivesh_cli.main import app
+    from nivesh_core.db import init_stores
+    from nivesh_core.db.duck import open_duck
+    from nivesh_core.db.sqlite import open_sqlite
+    from nivesh_core.market_store import write_macro
+    from nivesh_mcp.registry import SERVERS
+
+    root = Path(__file__).resolve().parents[1] / "fixtures"
+    args, data = cli_env
+    init_stores(data)
+    dummy_id, dummy_pw = pv.alpaca_key_value(), pv.alpaca_secret_value()
+    keyring.set_password("nivesh", "ALPACA_KEY", dummy_id)
+    keyring.set_password("nivesh", "ALPACA_SECRET", dummy_pw)
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        name = "account" if req.url.path == "/v2/account" else "positions"
+        return httpx.Response(200, text=(root / "alpaca" / f"{name}.json").read_text())
+
+    monkeypatch.setattr(
+        ch, "_alpaca_http", lambda: httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    runner = CliRunner()
+    conn = open_sqlite(data / "nivesh.sqlite")
+    conn.execute(
+        "INSERT INTO security (symbol, exchange, name, currency, market) "
+        "VALUES ('MSFT', 'NASDAQ', 'Microsoft Corp', 'USD', 'US')"
+    )
+    conn.close()
+    outputs = []
+    for cmd in (
+        ["import-csv", str(root / "csv" / "us_valid.csv"), "--market", "us"],
+        ["sync-us"],
+    ):
+        r = runner.invoke(app, [*args, *cmd])
+        assert r.exit_code == 0, (cmd, r.output)
+        outputs.append(r.output)
+    duck = open_duck(data / "nivesh.duckdb")
+    write_macro(duck, "usdinr", [(datetime(2026, 1, 5).date(), Decimal("83.5"))], "fred")
+    duck.close()
+
+    monkeypatch.setenv("NIVESH_CONFIG_DIR", args[1])
+    monkeypatch.setattr(mh, "_now", lambda: datetime(2026, 1, 5, 6, tzinfo=UTC))
+    payloads = []
+    for tool in ("combined_portfolio", "get_holdings", "get_lots"):
+        async with Client(SERVERS["holdings"].mcp) as c:
+            res = await c.call_tool(tool, {})
+        payloads.append(res.content[0].text)  # type: ignore[union-attr]
+
+    sql = open_sqlite(data / "nivesh.sqlite")
+    # content digests are 64 hex chars and can hold a 9-digit run by chance; they are not PII
+    dump = re.sub(r"[0-9a-f]{64}", "<digest>", "\n".join(sql.iterdump()))
+    sql.close()
+    files = "\n".join(
+        p.read_text(errors="ignore")
+        for p in data.rglob("*")
+        if p.is_file() and p.suffix in {".json", ".jsonl", ".txt", ".log"}
+    )
+    texts = {"cli": "\n".join(outputs), "db": dump, "files": files, "mcp": "\n".join(payloads)}
+    for label, text in texts.items():
+        found = scan_text(text)
+        assert found == [], (label, [text[f.start - 30 : f.end + 5] for f in found])
+        for secret_value in (dummy_id, dummy_pw, "PA-SAMPLE", "acct-sample-id", "asset-sample"):
+            assert secret_value not in text, (label, secret_value)
+    raw = open(data / "nivesh.duckdb", "rb").read()
+    assert dummy_id.encode() not in raw and dummy_pw.encode() not in raw

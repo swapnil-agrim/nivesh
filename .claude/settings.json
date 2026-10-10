@@ -9,6 +9,7 @@
       "mcp__holdings__combined_portfolio",
       "mcp__holdings__get_transactions",
       "mcp__holdings__read_cas_statement",
+      "mcp__holdings__get_lots",
       "mcp__market__get_prices",
       "mcp__market__get_index",
       "mcp__market__get_quote_eod",
