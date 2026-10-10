@@ -169,3 +169,21 @@ analysis:
     flag_penalty_hard: 50
     flag_penalty_soft: 20
     setup_quality: {breakout: 90, pullback: 80, trend_continuation: 70, base: 50, downtrend: 0, none: 30}
+
+# E7 research committee: owner-set parameters, example only and equal to the built-in defaults
+# (nothing here is advice). Model ids are SDK aliases, unverified against the live CLI: set exact
+# ids. tiers map each agent to top/mid/small (PID 14.1). prompt_pins pins a prompt version.
+agents:
+  models: {top: opus, mid: sonnet, small: haiku}
+  tiers: {fundamental: top, technical: mid, news: mid, macro: mid, mf: mid, bull: top, bear: top, lens: mid, risk: top, pm: top}
+  concurrency: 4               # live agents across the whole run, 1..16
+  debate_rounds: 2             # deep mode, 1..3
+  lenses_enabled: true
+  lenses: [value, growth, contrarian, valuation]
+  min_coverage_pct: 70         # below this the verdict is INSUFFICIENT_DATA
+  prompt_pins: {}              # agent -> version number; unset means the newest
+  max_turns: {}                # agent -> turn cap override
+  # max_budget_usd: 1.0        # per-agent spend cap (unset: none)
+  starter_weight_pct: 2        # weight tested against the profile limits for the risk veto
+  # max_days_to_trade: 5       # unset: liquidity does not veto
+  max_filing_sections: 2       # filing-text reads per fundamental run

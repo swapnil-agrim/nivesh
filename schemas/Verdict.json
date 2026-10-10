@@ -1,0 +1,183 @@
+{
+  "$defs": {
+    "EntryZone": {
+      "additionalProperties": false,
+      "properties": {
+        "ccy": {
+          "enum": [
+            "INR",
+            "USD"
+          ],
+          "title": "Ccy",
+          "type": "string"
+        },
+        "high": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "High"
+        },
+        "low": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Low"
+        }
+      },
+      "required": [
+        "low",
+        "high",
+        "ccy"
+      ],
+      "title": "EntryZone",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "as_of": {
+      "format": "date",
+      "title": "As Of",
+      "type": "string"
+    },
+    "bear_case": {
+      "title": "Bear Case",
+      "type": "string"
+    },
+    "bull_case": {
+      "title": "Bull Case",
+      "type": "string"
+    },
+    "conviction": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Conviction",
+      "type": "string"
+    },
+    "coverage_pct": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "title": "Coverage Pct"
+    },
+    "entry_zone": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EntryZone"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "horizon": {
+      "enum": [
+        "positional_1_6m",
+        "long_term_1y_plus"
+      ],
+      "title": "Horizon",
+      "type": "string"
+    },
+    "invalidation": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Invalidation",
+      "type": "array"
+    },
+    "overrides": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Overrides",
+      "type": "array"
+    },
+    "review_date": {
+      "format": "date",
+      "title": "Review Date",
+      "type": "string"
+    },
+    "risk_notes": {
+      "title": "Risk Notes",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "security_id": {
+      "title": "Security Id",
+      "type": "integer"
+    },
+    "suggested_weight_pct": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Suggested Weight Pct"
+    },
+    "verdict": {
+      "enum": [
+        "BUY",
+        "ACCUMULATE",
+        "HOLD",
+        "TRIM",
+        "SELL",
+        "AVOID",
+        "INSUFFICIENT_DATA"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    },
+    "vetoed_by_risk": {
+      "title": "Vetoed By Risk",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "security_id",
+    "as_of",
+    "verdict",
+    "horizon",
+    "conviction",
+    "review_date",
+    "bull_case",
+    "bear_case",
+    "risk_notes",
+    "vetoed_by_risk",
+    "coverage_pct"
+  ],
+  "title": "Verdict",
+  "type": "object"
+}

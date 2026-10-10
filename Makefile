@@ -1,6 +1,6 @@
 # Single source of truth for the quality gate; CI runs `make check` too.
 .PHONY: setup lint type test check audit
-COV = --cov=nivesh_engine --cov=nivesh_adapters --cov-fail-under=85
+COV = --cov=nivesh_engine --cov=nivesh_adapters --cov=nivesh_agents --cov-fail-under=85
 
 setup:
 	uv sync

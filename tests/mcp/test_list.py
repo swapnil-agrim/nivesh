@@ -38,7 +38,7 @@ def test_entrypoint_rejects_unknown_server() -> None:
     assert main(["nope"]) == 2
 
 
-def test_registry_has_all_seven_servers() -> None:
+def test_registry_has_all_eight_servers() -> None:
     assert list(SERVERS) == [
         "demo",
         "holdings",
@@ -47,6 +47,7 @@ def test_registry_has_all_seven_servers() -> None:
         "filings",
         "news",
         "macro",
+        "engine",
     ]
 
 

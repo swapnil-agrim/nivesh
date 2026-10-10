@@ -1,0 +1,103 @@
+{
+  "$defs": {
+    "WeightBounds": {
+      "additionalProperties": false,
+      "properties": {
+        "max_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Max Pct"
+        },
+        "min_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Min Pct"
+        }
+      },
+      "required": [
+        "min_pct",
+        "max_pct"
+      ],
+      "title": "WeightBounds",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "concentration_note": {
+      "default": "",
+      "title": "Concentration Note",
+      "type": "string"
+    },
+    "correlation_note": {
+      "default": "",
+      "title": "Correlation Note",
+      "type": "string"
+    },
+    "liquidity_note": {
+      "default": "",
+      "title": "Liquidity Note",
+      "type": "string"
+    },
+    "overrides": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Overrides",
+      "type": "array"
+    },
+    "risks": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Risks",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "security_id": {
+      "title": "Security Id",
+      "type": "integer"
+    },
+    "veto": {
+      "title": "Veto",
+      "type": "boolean"
+    },
+    "veto_reasons": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Veto Reasons",
+      "type": "array"
+    },
+    "weight_bounds": {
+      "$ref": "#/$defs/WeightBounds"
+    }
+  },
+  "required": [
+    "security_id",
+    "veto",
+    "weight_bounds"
+  ],
+  "title": "RiskAssessment",
+  "type": "object"
+}

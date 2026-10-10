@@ -9,15 +9,17 @@ from nivesh_mcp.base import _desc_write_words, is_write_name
 ROOT = Path(__file__).resolve().parents[2]
 ENGINE = (
     "dmath metric bars ta levels regime setups fa valuation redflags xray risk metrics screen "
-    "scoring"
+    "scoring committee_rules"
 ).split()
 MODULES = [
     *(ROOT / "nivesh_engine" / f"{n}.py" for n in ENGINE),
     ROOT / "nivesh_engine" / "returns.py",
     ROOT / "nivesh_core" / "analysis_config.py",
     ROOT / "nivesh_adapters" / "analysis_data.py",
+    ROOT / "nivesh_adapters" / "analysis_service.py",
 ]
 LOADER = ROOT / "nivesh_adapters" / "analysis_data.py"
+SERVICE = ROOT / "nivesh_adapters" / "analysis_service.py"
 CLI = ROOT / "nivesh_cli" / "engine.py"
 
 
@@ -41,7 +43,7 @@ def test_new_analysis_modules_have_no_write_words_in_names_or_docstrings() -> No
 
 def test_analysis_modules_do_not_import_mcp_or_adapters_except_loader() -> None:
     for path in _present():
-        if path in (LOADER, CLI):
+        if path in (LOADER, SERVICE, CLI):
             continue
         for node in ast.walk(ast.parse(path.read_text())):
             names: list[str] = []
@@ -79,14 +81,22 @@ def test_analysis_engine_cli_commands_have_no_write_verb() -> None:
     assert not any(is_write_name(n) for n in names)
 
 
-def test_registered_mcp_servers_unchanged_and_no_engine_server_in_mcp_json_or_allow_list() -> None:
+def test_engine_server_is_registered_with_exactly_the_ten_read_only_tools() -> None:
+    import json
+
     from nivesh_mcp.registry import SERVERS
 
-    assert set(SERVERS) == SERVERS_BEFORE_E6  # the nivesh-engine server is deferred (D1)
-    mcp_json = (ROOT / ".mcp.json").read_text()
-    allow = (ROOT / ".claude" / "settings.json").read_text()
-    for text in (mcp_json, allow):
-        assert "nivesh-engine" not in text and "mcp__engine" not in text
+    tools = [
+        "ta_compute", "fa_compute", "valuation_range", "red_flags", "risk_metrics",
+        "portfolio_xray", "score", "mf_analyse", "mf_overlap", "get_fund_meta",
+    ]  # fmt: skip
+    assert set(SERVERS) == SERVERS_BEFORE_E6 | {"engine"} and list(SERVERS)[-1] == "engine"
+    assert SERVERS["engine"].tool_names == tools and not any(is_write_name(t) for t in tools)
+    assert "engine" in json.loads((ROOT / ".mcp.json").read_text())["mcpServers"]
+    settings = json.loads((ROOT / ".claude" / "settings.json").read_text())
+    allow = [a for a in settings["permissions"]["allow"] if a.startswith("mcp__engine__")]
+    assert allow == [f"mcp__engine__{t}" for t in tools]
+    assert "engine" in settings["enabledMcpjsonServers"]
 
 
 def test_analysis_data_module_defines_no_adapter_or_client_classes() -> None:

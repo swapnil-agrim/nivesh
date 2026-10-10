@@ -1,0 +1,107 @@
+# Hand-made engine-output summaries (not statements): ten synthetic securities with the
+# direction a sound fundamental read should reach. Invented numbers; no real company.
+items:
+- id: high_leverage_falling_cover
+  security_id: 1
+  symbol: G001
+  expected: bearish
+  summary:
+    net_debt_to_ebitda: 6.8
+    interest_cover: 1.4
+    debt_to_equity: 2.9
+    roce_pct: 6.1
+- id: deteriorating_margins
+  security_id: 2
+  symbol: G002
+  expected: bearish
+  summary:
+    ebitda_margin_pct:
+    - 18
+    - 16
+    - 14
+    - 11
+    net_margin_pct:
+    - 9
+    - 7
+    - 5
+    - 3
+    revenue_growth_pct: 2
+- id: strong_cash_conversion
+  security_id: 3
+  symbol: G003
+  expected: bullish
+  summary:
+    cfo_to_pat: 1.3
+    fcf_margin_pct: 14
+    roce_pct: 24
+    net_debt_to_ebitda: 0.2
+- id: compounding_growth
+  security_id: 4
+  symbol: G004
+  expected: bullish
+  summary:
+    revenue_cagr_3y_pct: 21
+    eps_cagr_3y_pct: 26
+    roce_pct: 28
+    debt_to_equity: 0.1
+- id: cash_burn_and_dilution
+  security_id: 5
+  symbol: G005
+  expected: bearish
+  summary:
+    fcf_margin_pct: -12
+    share_count_change_pct: 9
+    cash_to_debt: 0.2
+- id: high_quality_low_debt
+  security_id: 6
+  symbol: G006
+  expected: bullish
+  summary:
+    roce_pct: 31
+    net_debt_to_ebitda: -0.5
+    ebitda_margin_pct:
+    - 27
+    - 28
+    - 29
+    - 30
+- id: receivable_days_surge
+  security_id: 7
+  symbol: G007
+  expected: bearish
+  summary:
+    receivable_days:
+    - 55
+    - 70
+    - 95
+    - 130
+    cfo_to_pat: 0.3
+    revenue_growth_pct: 15
+- id: steady_margin_expansion
+  security_id: 8
+  symbol: G008
+  expected: bullish
+  summary:
+    ebitda_margin_pct:
+    - 15
+    - 17
+    - 19
+    - 22
+    revenue_growth_pct: 16
+    cfo_to_pat: 1.1
+- id: shrinking_revenue_rising_debt
+  security_id: 9
+  symbol: G009
+  expected: bearish
+  summary:
+    revenue_growth_pct: -8
+    total_debt_change_pct: 35
+    interest_cover: 2.0
+- id: net_cash_with_strong_returns
+  security_id: 10
+  symbol: G010
+  expected: bullish
+  summary:
+    net_debt_to_ebitda: -1.2
+    roce_pct: 22
+    eps_cagr_3y_pct: 14
+    cfo_to_pat: 1.0

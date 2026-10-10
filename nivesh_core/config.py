@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from nivesh_core.agents_config import AgentsSettings
 from nivesh_core.analysis_config import AnalysisSettings
 from nivesh_core.errors import ConfigError
 from nivesh_core.secrets import REF_RE
@@ -296,6 +297,7 @@ class Settings(BaseModel):
     us_broker: UsBrokerSettings = UsBrokerSettings()
     mf: MfSettings = MfSettings()
     analysis: AnalysisSettings = AnalysisSettings()
+    agents: AgentsSettings = AgentsSettings()
 
     @field_validator("registered_ip")
     @classmethod

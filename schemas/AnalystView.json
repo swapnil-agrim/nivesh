@@ -1,0 +1,272 @@
+{
+  "$defs": {
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of"
+        },
+        "field": {
+          "minLength": 1,
+          "title": "Field",
+          "type": "string"
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Url"
+        },
+        "tool_call_id": {
+          "minLength": 1,
+          "title": "Tool Call Id",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "tool_call_id",
+        "field",
+        "value"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "KeyPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "claim": {
+          "maxLength": 600,
+          "minLength": 1,
+          "title": "Claim",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "claim",
+        "evidence"
+      ],
+      "title": "KeyPoint",
+      "type": "object"
+    },
+    "Levels": {
+      "additionalProperties": false,
+      "description": "Technical numbers; each must equal the engine value (checked outside the schema).",
+      "properties": {
+        "entry_high": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entry High"
+        },
+        "entry_low": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entry Low"
+        },
+        "invalidation": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Invalidation"
+        },
+        "setup_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Setup Type"
+        },
+        "stop": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stop"
+        }
+      },
+      "title": "Levels",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "agent": {
+      "enum": [
+        "fundamental",
+        "technical",
+        "news"
+      ],
+      "title": "Agent",
+      "type": "string"
+    },
+    "as_of": {
+      "format": "date",
+      "title": "As Of",
+      "type": "string"
+    },
+    "confidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "data_gaps": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Data Gaps",
+      "type": "array"
+    },
+    "key_points": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/KeyPoint"
+      },
+      "title": "Key Points",
+      "type": "array"
+    },
+    "levels": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Levels"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "risks": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Risks",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "score": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Score",
+      "type": "integer"
+    },
+    "security_id": {
+      "title": "Security Id",
+      "type": "integer"
+    },
+    "stance": {
+      "enum": [
+        "bullish",
+        "neutral",
+        "bearish",
+        "insufficient_data"
+      ],
+      "title": "Stance",
+      "type": "string"
+    },
+    "thesis": {
+      "title": "Thesis",
+      "type": "string"
+    }
+  },
+  "required": [
+    "agent",
+    "security_id",
+    "as_of",
+    "stance",
+    "score",
+    "confidence",
+    "thesis"
+  ],
+  "title": "AnalystView",
+  "type": "object"
+}
