@@ -1,0 +1,3 @@
+# Owner-maintained renamed/merged ISINs: the old ISIN keeps resolving to the new security.
+# Example entry:  - {old_isin: INE000X01011, new_isin: INE000Y01012}
+[]

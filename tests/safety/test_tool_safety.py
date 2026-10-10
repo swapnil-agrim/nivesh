@@ -155,3 +155,47 @@ def test_holdings_server_has_no_write_tool_and_no_write_words_in_descriptions() 
     for tool in srv.tool_names:
         assert not is_write_name(tool), tool
         assert _desc_write_words(srv.tool_docs[tool]) == [], tool
+
+
+MARKET_SERVERS = ("market", "fundamentals", "filings", "news", "macro")
+MARKET_ADAPTERS = {
+    "MasterSources", "IndiaPrices", "UsPrices", "Edgar", "IndiaFundamentals", "MacroFetch",
+    "Estimates", "Feeds",
+}  # fmt: skip
+
+
+def test_market_servers_have_no_write_tool_and_no_write_words_in_descriptions() -> None:
+    from nivesh_mcp.base import _desc_write_words
+
+    assert set(MARKET_SERVERS) <= set(SERVERS)
+    total = 0
+    for name in MARKET_SERVERS:
+        srv = SERVERS[name]
+        for tool in srv.tool_names:
+            total += 1
+            assert not is_write_name(tool), (name, tool)
+            assert _desc_write_words(srv.tool_docs[tool]) == [], (name, tool)
+    assert total == 20
+
+
+def test_market_adapters_have_no_write_methods() -> None:
+    found = {c.__name__: c for c in discover_adapter_classes()}
+    assert MARKET_ADAPTERS <= set(found)  # the discovery helper includes every new adapter
+    for name in MARKET_ADAPTERS:
+        assert write_methods(found[name]) == [], name
+        assert issubclass(found[name], Adapter)
+
+
+def test_market_modules_use_no_write_verbs_in_names_or_docstrings() -> None:
+    import ast
+
+    mods = ["market", "fundamentals", "filings", "news", "macro", "common"]
+    for mod in mods:
+        tree = ast.parse((ROOT / "nivesh_mcp" / f"{mod}.py").read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                assert not is_write_name(node.name), (mod, node.name)
+                doc = ast.get_docstring(node) or ""
+                from nivesh_mcp.base import _desc_write_words
+
+                assert _desc_write_words(doc) == [], (mod, node.name)

@@ -43,3 +43,10 @@ def test_importing_cli_and_registry_does_not_load_casparser() -> None:
         "assert not bad, bad"
     )
     subprocess.run([sys.executable, "-c", code], check=True, cwd=ROOT)  # noqa: S603
+
+
+def test_no_market_stack_dependencies() -> None:
+    banned = ("pandas", "numpy", "yfinance", "feedparser", "exchange-calendars")
+    banned += ("exchange_calendars", "rapidfuzz", "openbb", "lxml")
+    deps = [d.lower() for d in PYPROJECT["project"]["dependencies"]]
+    assert not [d for d in deps if any(d.startswith(b) for b in banned)]

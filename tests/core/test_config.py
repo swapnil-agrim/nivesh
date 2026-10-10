@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -121,3 +122,70 @@ def test_investright_base_url_must_be_https(tmp_path: Path) -> None:
 def test_investright_redirect_port_range(tmp_path: Path, port: int) -> None:
     with pytest.raises(ConfigError, match="redirect_port"):
         load_settings(write(tmp_path, f"investright: {{redirect_port: {port}}}\n"))
+
+
+def test_new_ttl_defaults_news_macro_filings_estimates_master() -> None:
+    t = load_settings(ROOT / "config" / "nivesh.yaml").ttls
+    assert (t.news, t.macro, t.filings, t.estimates, t.master) == (
+        timedelta(hours=6), timedelta(days=1), timedelta(days=7), timedelta(days=1),
+        timedelta(days=7),
+    )  # fmt: skip
+
+
+def test_sample_config_loads_with_market_block() -> None:
+    m = load_settings(ROOT / "config" / "nivesh.yaml").market
+    assert m.edgar_max_per_sec <= 10 and m.macro_series["usdinr"].source == "fred"
+    assert 2026 in m.nse_holidays and m.feeds and m.cross_check_tolerance == Decimal("0.01")
+
+
+def test_market_defaults_present_when_block_absent(tmp_path: Path) -> None:
+    m = load_settings(write(tmp_path, "data_dir: x\n")).market
+    assert m.edgar_max_per_sec == 8 and m.us_secondary == "stooq"
+    assert m.fred_api_key == "ref:FRED_API_KEY" and m.fmp_api_key == "ref:FMP_API_KEY"
+    assert m.macro_series == {} and m.feeds == [] and m.nse_holidays == {}
+
+
+def test_market_secret_fields_must_be_refs(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="fmp_api_key"):
+        load_settings(write(tmp_path, "market: {fmp_api_key: lowercase}\n"))
+
+
+def test_market_literal_fred_key_rejected_without_echoing_value(tmp_path: Path) -> None:
+    from tests import pii_values as pv
+
+    dummy = pv.fred_key()
+    with pytest.raises(ConfigError) as ei:
+        load_settings(write(tmp_path, f"market: {{fred_api_key: {dummy}}}\n"))
+    assert dummy not in str(ei.value) and "ref:" in str(ei.value)
+
+
+@pytest.mark.parametrize("rate", [0, 11])
+def test_edgar_rate_must_be_at_most_ten_per_second(tmp_path: Path, rate: int) -> None:
+    with pytest.raises(ConfigError, match="edgar_max_per_sec"):
+        load_settings(write(tmp_path, f"market: {{edgar_max_per_sec: {rate}}}\n"))
+
+
+@pytest.mark.parametrize("tol", [0, 0.6])
+def test_cross_check_tolerance_range(tmp_path: Path, tol: float) -> None:
+    with pytest.raises(ConfigError, match="cross_check_tolerance"):
+        load_settings(write(tmp_path, f"market: {{cross_check_tolerance: {tol}}}\n"))
+
+
+def test_cross_check_tolerance_yaml_float_is_exact_decimal(tmp_path: Path) -> None:
+    m = load_settings(write(tmp_path, "market: {cross_check_tolerance: 0.07}\n")).market
+    assert m.cross_check_tolerance == Decimal("0.07")
+
+
+def test_nse_holiday_year_must_match_key(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="nse_holidays"):
+        load_settings(write(tmp_path, "market: {nse_holidays: {2026: [2025-01-26]}}\n"))
+
+
+def test_feed_url_must_be_https(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="url"):
+        load_settings(write(tmp_path, "market: {feeds: [{name: a, url: 'http://x.test/f'}]}\n"))
+
+
+def test_macro_role_names_are_closed(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="macro_series"):
+        load_settings(write(tmp_path, "market: {macro_series: {bogus: {source: fred, id: X}}}\n"))

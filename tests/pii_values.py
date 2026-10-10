@@ -91,3 +91,20 @@ def person_address() -> str:
 
 def mobile_digits() -> str:
     return "98765" + "43210"
+
+
+# E4 dummies (never real credentials or contacts).
+def edgar_contact() -> str:
+    return "ops" + "@" + "example" + ".invalid"
+
+
+def fred_key() -> str:
+    return "fk" + "x" * 12
+
+
+def fmp_key() -> str:
+    return "mk" + "y" * 12
+
+
+def cik_synthetic() -> str:
+    return "0" + "0012" + "3456" + "7"  # zero-led 10-digit CIK shape; not a phone pattern

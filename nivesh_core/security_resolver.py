@@ -1,5 +1,5 @@
-"""Identifier resolution seam. The real security master is ST-4.8 (deferred); until then the
-`security` table answers, and anything unresolved is kept with its ISIN as symbol and flagged."""
+"""Identifier resolution seam. The `security` table (filled by the ST-4.8 security master) answers,
+and anything unresolved is kept with its ISIN as symbol and flagged."""
 
 import sqlite3
 from typing import Protocol
@@ -33,6 +33,13 @@ class TableResolver:
             "WHERE isin = ? AND unresolved = 0 ORDER BY id LIMIT 1",
             (isin,),
         ).fetchone()
+        if row is None:  # a renamed/merged ISIN still resolves to the current security
+            row = self.conn.execute(
+                "SELECT s.symbol, s.name, s.exchange, s.asset_class, s.amfi_code FROM security s "
+                "JOIN security_alias a ON a.security_id = s.id "
+                "WHERE a.kind = 'isin' AND a.value = ? AND s.unresolved = 0 ORDER BY s.id LIMIT 1",
+                (isin,),
+            ).fetchone()
         if row is None:
             return None
         return Resolved(

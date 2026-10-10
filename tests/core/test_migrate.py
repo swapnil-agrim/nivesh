@@ -38,10 +38,10 @@ def test_fresh_db_gets_latest_version() -> None:
 def test_upgrade_preserves_fixture_rows(tmp_path: Path) -> None:
     c = conn()
     c.executescript(FIXTURE.read_text())
-    d = migrations_with_next(tmp_path, "ALTER TABLE security ADD COLUMN sector TEXT;")
+    d = migrations_with_next(tmp_path, "ALTER TABLE security ADD COLUMN zz_probe TEXT;")
     migrate.apply(c, d)
     assert migrate.current_version(c) == NEXT
-    rows = c.execute("select symbol, name, sector from security order by id").fetchall()
+    rows = c.execute("select symbol, name, zz_probe from security order by id").fetchall()
     assert rows == [("TESTCO", "Test Co", None), ("DEMO", "Demo Inc", None)]
     migrate.apply(c, d)  # rerun is a no-op
     assert migrate.current_version(c) == NEXT
@@ -51,13 +51,13 @@ def test_upgrade_preserves_fixture_rows(tmp_path: Path) -> None:
 def test_failing_migration_rolls_back(tmp_path: Path) -> None:
     c = conn()
     c.executescript(FIXTURE.read_text())
-    bad = "ALTER TABLE security ADD COLUMN sector TEXT;\nTHIS IS NOT SQL;"
+    bad = "ALTER TABLE security ADD COLUMN zz_probe TEXT;\nTHIS IS NOT SQL;"
     d = migrations_with_next(tmp_path, bad)
     with pytest.raises(MigrationError, match=f"{NEXT:04d}_add_col"):
         migrate.apply(c, d)
     assert migrate.current_version(c) == LATEST
     cols = [r[1] for r in c.execute("pragma table_info(security)")]
-    assert "sector" not in cols  # first statement was rolled back too
+    assert "zz_probe" not in cols  # first statement was rolled back too
     assert not c.in_transaction
 
 

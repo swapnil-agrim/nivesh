@@ -256,3 +256,13 @@ def test_restore_rolls_back_when_final_placement_fails(
     monkeypatch.setattr(backup.shutil, "move", real)
     backup.restore_backup(out, fresh, tmp_path / "id")
     assert (fresh / "nivesh.sqlite").exists() and (fresh / "runs" / "1").is_dir()
+
+
+def test_backup_reports_a_locked_market_database_clearly(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    init_stores(data)
+    into = tmp_path / "into"
+    into.mkdir()
+    with duckdb.connect(str(data / "nivesh.duckdb"), read_only=True):  # a reader holds the file
+        with pytest.raises(NiveshError, match="in use"):
+            backup._snapshot(data, into)

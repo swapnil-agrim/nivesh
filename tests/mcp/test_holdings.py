@@ -333,3 +333,12 @@ async def test_read_cas_statement_output_contains_no_pii(cas_env: Path) -> None:
         assert scan_text(text) == [], name
         for pii in pii_strings():
             assert pii not in text
+
+
+async def test_holdings_tools_work_while_market_reader_is_open(env: Path) -> None:
+    import duckdb
+
+    with duckdb.connect(str(env / "nivesh.duckdb"), read_only=True) as reader:
+        reader.execute("select 1")
+        with mh._db() as conn:  # init_stores must not need the DuckDB write lock
+            assert conn.execute("select count(*) from security").fetchone() is not None

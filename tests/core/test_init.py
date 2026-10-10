@@ -32,7 +32,8 @@ def test_init_creates_private_stores(tmp_path: Path) -> None:
     assert s.execute("select max(version) from schema_version").fetchone() == (latest,)
     s.close()
     with duckdb.connect(str(d / "nivesh.duckdb")) as k:
-        assert k.execute("select max(version) from schema_version").fetchone() == (1,)
+        latest_duck = migrate.latest_version(MIGRATIONS / "duck")
+        assert k.execute("select max(version) from schema_version").fetchone() == (latest_duck,)
         k.execute("select * from cache_entry")
 
 
@@ -110,3 +111,68 @@ def test_run_dir_is_private(tmp_path: Path) -> None:
 
     d = run_dir(tmp_path, 7)
     assert d == tmp_path / "runs" / "7" and mode(d) == 0o700 and mode(d.parent) == 0o700
+
+
+def _duck_version(d: Path) -> int:
+    with duckdb.connect(str(d / "nivesh.duckdb"), read_only=True) as k:
+        return migrate.current_version(k)
+
+
+def test_init_stores_creates_missing_duckdb(tmp_path: Path) -> None:
+    d = tmp_path / "data"
+    init_stores(d)
+    assert _duck_version(d) == migrate.latest_version(MIGRATIONS / "duck")
+
+
+def test_init_stores_skips_duckdb_write_open_when_current(tmp_path: Path) -> None:
+    d = tmp_path / "data"
+    init_stores(d)
+    with duckdb.connect(str(d / "nivesh.duckdb"), read_only=True) as held:
+        init_stores(d)  # would raise a lock error if it opened read-write
+        held.execute("select 1")
+
+
+def test_init_stores_survives_active_writer_lock(tmp_path: Path) -> None:
+    d = tmp_path / "data"
+    init_stores(d)
+    with duckdb.connect(str(d / "nivesh.duckdb")):
+        init_stores(d)
+    s = sqlite3.connect(d / "nivesh.sqlite")
+    assert s.execute("select max(version) from schema_version").fetchone() == (
+        migrate.latest_version(MIGRATIONS / "sqlite"),
+    )
+    s.close()
+
+
+def _with_extra_duck_migration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> int:
+    import shutil
+
+    import nivesh_core.db as db
+
+    mig = tmp_path / "mig"
+    shutil.copytree(MIGRATIONS, mig)
+    nxt = migrate.latest_version(MIGRATIONS / "duck") + 1
+    (mig / "duck" / f"{nxt:04d}_probe.sql").write_text("CREATE TABLE zz_probe (a INTEGER);")
+    monkeypatch.setattr(db, "MIGRATIONS", mig)
+    return nxt
+
+
+def test_init_stores_applies_pending_duck_migration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    d = tmp_path / "data"
+    init_stores(d)
+    nxt = _with_extra_duck_migration(tmp_path, monkeypatch)
+    init_stores(d)
+    assert _duck_version(d) == nxt
+
+
+def test_init_stores_still_refuses_newer_duck_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    d = tmp_path / "data"
+    _with_extra_duck_migration(tmp_path, monkeypatch)
+    init_stores(d)  # at the extended version
+    monkeypatch.undo()  # code now only knows the shipped migrations
+    with pytest.raises(migrate.MigrationError, match="newer"):
+        init_stores(d)

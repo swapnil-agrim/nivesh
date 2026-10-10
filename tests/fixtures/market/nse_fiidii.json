@@ -1,0 +1,4 @@
+[
+  {"category": "DII", "date": "09-Jan-2026", "buyValue": "12345.67", "sellValue": "11000.10", "netValue": "1345.57"},
+  {"category": "FII/FPI ", "date": "09-Jan-2026", "buyValue": "9000.00", "sellValue": "10500.50", "netValue": "-1500.50"}
+]

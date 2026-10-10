@@ -2,7 +2,7 @@
 mode: dev
 data_dir: data
 # Optional: set the Anthropic credential reference here (a ref: name, never a value).
-ttls: {price: 1d, fundamentals: 7d, nav: 1d, mf_holdings: 31d}
+ttls: {price: 1d, fundamentals: 7d, nav: 1d, mf_holdings: 31d, news: 6h, macro: 1d, filings: 7d, estimates: 1d, master: 7d}
 # Example prices (USD per million tokens) and FX; replace with current figures. Used by the cost meter.
 prices:
   claude-sonnet-example: {input_usd_per_mtok: 3.0, output_usd_per_mtok: 15.0}
@@ -17,3 +17,30 @@ investright:
   app_key: ref:INVESTRIGHT_API_KEY
   api_secret: ref:INVESTRIGHT_API_SECRET
   # demat_ref: <holder_ref printed by `nivesh ingest` for the demat linked to InvestRight>
+
+# E4 market data. Secrets are refs; the EDGAR contact is read only from the secret EDGAR_CONTACT.
+# Series ids, feed urls and wire formats are per spec, unverified against live sources.
+market:
+  edgar_max_per_sec: 8        # SEC allows 10
+  fred_api_key: ref:FRED_API_KEY
+  fmp_api_key: ref:FMP_API_KEY
+  us_secondary: stooq         # stooq | none
+  cross_check_tolerance: 0.01
+  macro_series:               # role -> source/id (FRED ids unverified)
+    policy_us: {source: fred, id: DFEDTARU}
+    policy_in: {source: fred, id: INTDSRINM193N}
+    y10_us: {source: fred, id: DGS10}
+    y10_in: {source: fred, id: INDIRLTLT01STM}
+    cpi_us: {source: fred, id: CPIAUCSL}
+    cpi_in: {source: fred, id: INDCPIALLMINMEI}
+    usdinr: {source: fred, id: DEXINUS}
+    vix_us: {source: fred, id: VIXCLS}
+    crude: {source: fred, id: DCOILBRENTEU}
+    fii_net: {source: nse_flows, id: fii}
+    dii_net: {source: nse_flows, id: dii}
+  feeds:
+    - {name: example-news, url: "https://example.invalid/feed.xml", kind: rss}
+  # NSE holidays are gazette-announced, not computable. Owner must complete this list from the
+  # NSE circular (lunar holidays are missing here); a year with no entry fails loudly.
+  nse_holidays:
+    2026: [2026-01-26, 2026-05-01, 2026-08-15, 2026-10-02, 2026-12-25]

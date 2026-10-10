@@ -1,6 +1,7 @@
 import ipaddress
 import re
-from datetime import timedelta
+from datetime import date, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
@@ -32,8 +33,16 @@ class Ttls(BaseModel):
     fundamentals: timedelta = timedelta(days=7)
     nav: timedelta = timedelta(days=1)
     mf_holdings: timedelta = timedelta(days=31)
+    news: timedelta = timedelta(hours=6)
+    macro: timedelta = timedelta(days=1)
+    filings: timedelta = timedelta(days=7)
+    estimates: timedelta = timedelta(days=1)
+    master: timedelta = timedelta(days=7)
 
-    _parse = field_validator("price", "fundamentals", "nav", "mf_holdings", mode="before")(_ttl)
+    _parse = field_validator(
+        "price", "fundamentals", "nav", "mf_holdings", "news", "macro", "filings", "estimates",
+        "master", mode="before",
+    )(_ttl)  # fmt: skip
 
 
 class Price(BaseModel):
@@ -77,6 +86,69 @@ class InvestRightSettings(BaseModel):
         return v
 
 
+MacroRole = Literal[
+    "policy_us", "policy_in", "y10_us", "y10_in", "cpi_us", "cpi_in", "usdinr", "vix_us", "crude",
+    "fii_net", "dii_net",
+]  # fmt: skip
+
+
+class MacroSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source: Literal["fred", "nse_flows"]
+    id: str
+
+
+class FeedSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    url: str
+    kind: Literal["rss", "bse_announcements", "nse_announcements"] = "rss"
+
+    @field_validator("url")
+    @classmethod
+    def _https(cls, v: str) -> str:
+        if not v.startswith("https://"):
+            raise ValueError("must start with https://")
+        return v
+
+
+class MarketSettings(BaseModel):
+    """E4 market data. Wire details and series ids are per spec, unverified against live sources."""
+
+    model_config = ConfigDict(extra="forbid")
+    edgar_max_per_sec: float = Field(default=8, ge=1, le=10)  # SEC fair-access limit is 10
+    fred_api_key: str = "ref:FRED_API_KEY"
+    fmp_api_key: str = "ref:FMP_API_KEY"
+    us_secondary: Literal["stooq", "none"] = "stooq"
+    cross_check_tolerance: Decimal = Decimal("0.01")
+    macro_series: dict[MacroRole, MacroSpec] = {}
+    feeds: list[FeedSpec] = []
+    nse_holidays: dict[int, list[date]] = {}
+
+    @field_validator("cross_check_tolerance", mode="before")
+    @classmethod
+    def _tol(cls, v: Any) -> Decimal:
+        d = Decimal(str(v))  # YAML float 0.01 must become exactly 0.01
+        if not (0 < d <= Decimal("0.5")):
+            raise ValueError("must be > 0 and <= 0.5")
+        return d
+
+    @field_validator("fred_api_key", "fmp_api_key")
+    @classmethod
+    def _ref(cls, v: str) -> str:
+        if not REF_RE.match(v):
+            raise ValueError("must be a reference such as 'ref:NAME'")
+        return v
+
+    @field_validator("nse_holidays")
+    @classmethod
+    def _years(cls, v: dict[int, list[date]]) -> dict[int, list[date]]:
+        for year, days in v.items():
+            if any(d.year != year for d in days):
+                raise ValueError(f"holiday dates under {year} must all fall in {year}")
+        return v
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["dev", "prod"] = "dev"
@@ -89,6 +161,7 @@ class Settings(BaseModel):
     egress_url: str = "https://api.ipify.org"
     backup: BackupSettings = BackupSettings()
     investright: InvestRightSettings = InvestRightSettings()
+    market: MarketSettings = MarketSettings()
 
     @field_validator("registered_ip")
     @classmethod

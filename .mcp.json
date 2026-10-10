@@ -3,12 +3,79 @@
     "demo": {
       "type": "stdio",
       "command": "uv",
-      "args": ["run", "python", "-m", "nivesh_mcp", "demo"]
+      "args": [
+        "run",
+        "python",
+        "-m",
+        "nivesh_mcp",
+        "demo"
+      ]
     },
     "holdings": {
       "type": "stdio",
       "command": "uv",
-      "args": ["run", "python", "-m", "nivesh_mcp", "holdings"]
+      "args": [
+        "run",
+        "python",
+        "-m",
+        "nivesh_mcp",
+        "holdings"
+      ]
+    },
+    "market": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "-m",
+        "nivesh_mcp",
+        "market"
+      ]
+    },
+    "fundamentals": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "-m",
+        "nivesh_mcp",
+        "fundamentals"
+      ]
+    },
+    "filings": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "-m",
+        "nivesh_mcp",
+        "filings"
+      ]
+    },
+    "news": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "-m",
+        "nivesh_mcp",
+        "news"
+      ]
+    },
+    "macro": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "-m",
+        "nivesh_mcp",
+        "macro"
+      ]
     }
   }
 }
