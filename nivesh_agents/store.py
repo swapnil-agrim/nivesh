@@ -18,8 +18,9 @@ from nivesh_core.paths import write_private
 from nivesh_core.trace import Tracer
 
 KINDS = frozenset(
-    {"fundamental", "technical", "news", "macro", "mf", "debate", "lenses", "risk", "verdict"}
-)
+    {"fundamental", "technical", "news", "macro", "mf", "debate", "lenses", "risk", "verdict",
+     "thesis_draft", "holding_review"}
+)  # fmt: skip
 
 
 def dump(data: Any) -> bytes:

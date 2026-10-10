@@ -1,5 +1,48 @@
 {
   "$defs": {
+    "CriterionCheck": {
+      "additionalProperties": false,
+      "description": "One kill criterion: met, not_met or unknown. An agent's met or not_met needs evidence;\ncode-judged entries (machine metrics) carry `judged_by: code`.",
+      "properties": {
+        "criterion_id": {
+          "minimum": 1,
+          "title": "Criterion Id",
+          "type": "integer"
+        },
+        "evidence": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "judged_by": {
+          "default": "agent",
+          "enum": [
+            "agent",
+            "code"
+          ],
+          "title": "Judged By",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "met",
+            "not_met",
+            "unknown"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "criterion_id",
+        "status"
+      ],
+      "title": "CriterionCheck",
+      "type": "object"
+    },
     "Evidence": {
       "additionalProperties": false,
       "properties": {
@@ -60,18 +103,80 @@
       ],
       "title": "Evidence",
       "type": "object"
+    },
+    "Reason": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "maxLength": 60,
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 600,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "text"
+      ],
+      "title": "Reason",
+      "type": "object"
+    },
+    "TriggerResult": {
+      "additionalProperties": false,
+      "description": "A section 15.6 rule result, computed in code.",
+      "properties": {
+        "code": {
+          "enum": [
+            "kill_criterion",
+            "fundamental_deterioration",
+            "valuation_stretch",
+            "concentration",
+            "below_sma200_weak_rs",
+            "better_use_of_capital"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "default": "",
+          "title": "Detail",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "triggered",
+            "clear",
+            "not_evaluable",
+            "not_applicable"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "status"
+      ],
+      "title": "TriggerResult",
+      "type": "object"
     }
   },
   "additionalProperties": false,
-  "description": "Schema and model only in E7: no agent produces it yet.",
+  "description": "Review of one held security against its thesis. Triggers, the tax note and overrides\nare filled by code; code can only lower the proposed action.",
   "properties": {
     "action": {
       "enum": [
-        "keep",
-        "add",
-        "trim",
-        "exit",
-        "review"
+        "HOLD",
+        "ADD",
+        "TRIM",
+        "EXIT",
+        "REVIEW"
       ],
       "title": "Action",
       "type": "string"
@@ -81,6 +186,23 @@
       "title": "As Of",
       "type": "string"
     },
+    "confidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "criteria": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/CriterionCheck"
+      },
+      "title": "Criteria",
+      "type": "array"
+    },
     "evidence": {
       "default": [],
       "items": {
@@ -89,17 +211,30 @@
       "title": "Evidence",
       "type": "array"
     },
-    "kill_criteria_hit": {
+    "override_reason": {
+      "default": "",
+      "title": "Override Reason",
+      "type": "string"
+    },
+    "overrides": {
       "default": [],
       "items": {
         "type": "string"
       },
-      "title": "Kill Criteria Hit",
+      "title": "Overrides",
+      "type": "array"
+    },
+    "reasons": {
+      "items": {
+        "$ref": "#/$defs/Reason"
+      },
+      "minItems": 1,
+      "title": "Reasons",
       "type": "array"
     },
     "schema_version": {
-      "const": 1,
-      "default": 1,
+      "const": 2,
+      "default": 2,
       "title": "Schema Version",
       "type": "integer"
     },
@@ -122,6 +257,14 @@
       "title": "Thesis Status",
       "type": "string"
     },
+    "triggers": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/TriggerResult"
+      },
+      "title": "Triggers",
+      "type": "array"
+    },
     "valuation_stretch": {
       "anyOf": [
         {
@@ -139,6 +282,8 @@
     "security_id",
     "as_of",
     "action",
+    "confidence",
+    "reasons",
     "thesis_status"
   ],
   "title": "HoldingReview",

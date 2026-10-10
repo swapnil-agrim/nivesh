@@ -1,27 +1,26 @@
 import asyncio
-import sqlite3
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from nivesh_agents.runtime import run_command, safe_error
-from nivesh_cli.common import settings_of, user_errors
+from nivesh_cli.common import metered_run, profile_of, settings_of, user_errors
 from nivesh_cli.engine import engine_app
 from nivesh_cli.holdings import holdings_app
 from nivesh_cli.market import market_app, master_app
 from nivesh_cli.mf import mf_app
+from nivesh_cli.review import review_app
+from nivesh_cli.thesis import thesis_app
 from nivesh_core.config import Settings, load_settings
 from nivesh_core.cost import gate, month_to_date
 from nivesh_core.db import init_stores
 from nivesh_core.db.sqlite import open_sqlite
 from nivesh_core.egress import check_egress
-from nivesh_core.errors import ConfigError, SecretNotFound
-from nivesh_core.paths import run_dir
+from nivesh_core.errors import ConfigError
 from nivesh_core.profile import Profile, load_profile
-from nivesh_core.secrets import SecretRef, secret_exists, set_secret
-from nivesh_core.timeutil import to_iso, utcnow
-from nivesh_core.trace import Tracer
+from nivesh_core.secrets import secret_exists, set_secret
+from nivesh_core.timeutil import utcnow
 
 TIERS = ("brief", "quick", "deep")
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="Nivesh research agent.")
@@ -34,6 +33,8 @@ app.registered_commands.extend(engine_app.registered_commands)  # ta, fa, valuat
 app.add_typer(master_app, name="master")
 app.add_typer(market_app, name="market")
 app.add_typer(mf_app, name="mf")
+app.add_typer(thesis_app, name="thesis")
+app.add_typer(review_app, name="review")
 
 
 @app.callback()
@@ -54,8 +55,7 @@ def _settings(ctx: typer.Context) -> Settings:
 
 
 def _profile(ctx: typer.Context) -> Profile:
-    profile: Profile = ctx.obj[1]
-    return profile
+    return profile_of(ctx)
 
 
 @app.command()
@@ -119,68 +119,21 @@ def run(
     if tier not in TIERS:
         typer.echo(f"error: --tier must be one of {', '.join(TIERS)}", err=True)
         raise typer.Exit(2)
-    env: dict[str, str] = {}
-    if settings.anthropic_api_key:
-        try:
-            env["ANTHROPIC_API_KEY"] = SecretRef(settings.anthropic_api_key).resolve()
-        except SecretNotFound:
-            pass  # fall back to an existing Claude Code login / environment
-    if settings.registered_ip:  # CR-2: report, never retry or block
-        res = check_egress(settings.registered_ip, settings.egress_url)
-        if res.status in ("mismatch", "error"):
-            typer.echo(f"warning: {res.message}", err=True)
-    data_dir = Path(settings.data_dir)
-    with user_errors():
-        init_stores(data_dir)
-    conn = open_sqlite(data_dir / "nivesh.sqlite")
-    try:
-        decision = gate(month_to_date(conn, utcnow()), _profile(ctx).monthly_cost_cap, tier, force)
-        if decision.warn:
-            typer.echo(f"warning: {decision.message}", err=True)
-        if not decision.allowed:
-            raise typer.Exit(1)
-        run_id = _start_run(conn, command, decision.tier, data_dir)
-        tracer = Tracer(run_dir(data_dir, run_id), run_id)
-        status, out = "error", ""
+    out = ""
+    with metered_run(settings, _profile(ctx), command, tier, force=force) as m:
         try:
             out = asyncio.run(
                 run_command(
-                    command, args or [], mode=settings.mode, refresh=refresh, env=env,
-                    tracer=tracer, prices=settings.prices, usd_inr=settings.usd_inr,
+                    command, args or [], mode=settings.mode, refresh=refresh, env=m.env,
+                    tracer=m.tracer, prices=settings.prices, usd_inr=settings.usd_inr,
                 )
             )  # fmt: skip
-            status = "ok"
+            m.status = "ok"
         except Exception as e:  # noqa: BLE001 - every failure must become a clean non-zero exit
             typer.echo(f"error: {safe_error(e)}", err=True)
-        finally:
-            _finish_run(conn, run_id, status, tracer)
-    finally:
-        conn.close()
-    if status != "ok":
+    if m.status != "ok":
         raise typer.Exit(1)
     typer.echo(out)
-
-
-def _start_run(conn: sqlite3.Connection, command: str, tier: str, data_dir: Path) -> int:
-    cur = conn.execute(
-        "INSERT INTO run (command, started_at, status, tier) VALUES (?, ?, 'running', ?)",
-        (command, to_iso(utcnow()), tier),
-    )
-    run_id = int(cur.lastrowid or 0)
-    conn.execute("UPDATE run SET run_dir = ? WHERE id = ?", (f"runs/{run_id}", run_id))
-    return run_id
-
-
-def _finish_run(conn: sqlite3.Connection, run_id: int, status: str, tracer: Tracer) -> None:
-    r = tracer.summary
-    conn.execute(
-        "UPDATE run SET finished_at = ?, status = ?, model = ?, prompt_version = ?, "
-        "input_tokens = ?, output_tokens = ?, cost_inr = ? WHERE id = ?",
-        (
-            to_iso(utcnow()), status, r.get("model"), tracer.prompt_ver,
-            r.get("input_tokens", 0), r.get("output_tokens", 0), r.get("cost_inr", 0.0), run_id,
-        ),
-    )  # fmt: skip
 
 
 @app.command()

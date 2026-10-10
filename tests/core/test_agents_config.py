@@ -70,6 +70,7 @@ def test_tier_map_covers_every_agent_and_only_top_mid_small(tmp_path: Path) -> N
     assert set(t) == set(AGENTS) and set(t.values()) <= {"top", "mid", "small"}
     assert t["fundamental"] == "top" and t["technical"] == "mid" and t["pm"] == "top"
     assert t["bull"] == "top" and t["lens"] == "mid" and t["risk"] == "top"
+    assert t["thesis_draft"] == "top" and t["holding_review"] == "top"
     bad(tmp_path, "agents: {tiers: {pm: huge}}\n", "tiers")
     bad(tmp_path, "agents: {tiers: {nobody: top}}\n", "tiers")
 

@@ -1,0 +1,160 @@
+{
+  "$defs": {
+    "KillCriterion": {
+      "additionalProperties": false,
+      "description": "One condition that breaks the thesis. Machine-checkable when metric, comparator and\nthreshold are all set (code judges it); otherwise text only (the reviewer judges it).",
+      "properties": {
+        "comparator": {
+          "anyOf": [
+            {
+              "enum": [
+                "lt",
+                "lte",
+                "gt",
+                "gte"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Comparator"
+        },
+        "criterion_id": {
+          "minimum": 1,
+          "title": "Criterion Id",
+          "type": "integer"
+        },
+        "metric": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metric"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threshold"
+        },
+        "unit": {
+          "default": "",
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "criterion_id",
+        "text"
+      ],
+      "title": "KillCriterion",
+      "type": "object"
+    },
+    "ViewRef": {
+      "additionalProperties": false,
+      "description": "Pointer into an analyst view that the agent was given.",
+      "properties": {
+        "point_index": {
+          "minimum": 0,
+          "title": "Point Index",
+          "type": "integer"
+        },
+        "view": {
+          "title": "View",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view",
+        "point_index"
+      ],
+      "title": "ViewRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A drafted thesis for the owner to accept, edit or skip (ST-8.1).",
+  "properties": {
+    "as_of": {
+      "format": "date",
+      "title": "As Of",
+      "type": "string"
+    },
+    "data_gaps": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Data Gaps",
+      "type": "array"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/ViewRef"
+      },
+      "minItems": 1,
+      "title": "Evidence",
+      "type": "array"
+    },
+    "horizon": {
+      "enum": [
+        "positional_1_6m",
+        "long_term_1y_plus"
+      ],
+      "title": "Horizon",
+      "type": "string"
+    },
+    "kill_criteria": {
+      "items": {
+        "$ref": "#/$defs/KillCriterion"
+      },
+      "title": "Kill Criteria",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "security_id": {
+      "title": "Security Id",
+      "type": "integer"
+    },
+    "why": {
+      "title": "Why",
+      "type": "string"
+    }
+  },
+  "required": [
+    "security_id",
+    "as_of",
+    "horizon",
+    "why",
+    "kill_criteria",
+    "evidence"
+  ],
+  "title": "ThesisDraft",
+  "type": "object"
+}

@@ -1,7 +1,8 @@
-"""Output contracts of the research committee (ST-7.1). The pydantic models here are the single
-source; `schemas/<Name>.json` is generated from them and a drift test guards the committed files.
+"""Output contracts of the research committee (ST-7.1) and portfolio review (ST-8.1, ST-8.2). The
+pydantic models here are the single source; `schemas/<Name>.json` is generated from them and a
+drift test guards the committed files.
 
-Regenerate the eight files (run from the repository root):
+Regenerate the nine files (run from the repository root):
 
     uv run python -c "from nivesh_agents.schemas import write_schema_files; write_schema_files()"
 
@@ -15,6 +16,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from nivesh_core.thesis import Horizon, KillCriterion, check_criteria, check_why
 
 SCHEMA_DIR = Path(__file__).resolve().parents[1] / "schemas"
 Stance = Literal["bullish", "neutral", "bearish", "insufficient_data"]
@@ -214,18 +217,82 @@ class RiskAssessment(_M):
     overrides: list[str] = []
 
 
+class Reason(_M):
+    code: str = Field(min_length=1, max_length=60)
+    text: str = Field(min_length=1, max_length=600)
+
+
+class CriterionCheck(_M):
+    """One kill criterion: met, not_met or unknown. An agent's met or not_met needs evidence;
+    code-judged entries (machine metrics) carry `judged_by: code`."""
+
+    criterion_id: int = Field(ge=1)
+    status: Literal["met", "not_met", "unknown"]
+    evidence: list[Evidence] = []
+    judged_by: Literal["agent", "code"] = "agent"
+
+    @model_validator(mode="after")
+    def _evidence(self) -> "CriterionCheck":
+        if self.status != "unknown" and self.judged_by == "agent" and not self.evidence:
+            raise ValueError("a met or not_met criterion needs evidence")
+        return self
+
+
+TriggerCode = Literal[
+    "kill_criterion", "fundamental_deterioration", "valuation_stretch", "concentration",
+    "below_sma200_weak_rs", "better_use_of_capital",
+]  # fmt: skip
+
+
+class TriggerResult(_M):
+    """A section 15.6 rule result, computed in code."""
+
+    code: TriggerCode
+    status: Literal["triggered", "clear", "not_evaluable", "not_applicable"]
+    detail: str = ""
+
+
 class HoldingReview(_M):
-    """Schema and model only in E7: no agent produces it yet."""
+    """Review of one held security against its thesis. Triggers, the tax note and overrides
+    are filled by code; code can only lower the proposed action."""
+
+    schema_version: Literal[2] = 2
+    security_id: int
+    as_of: date
+    action: Literal["HOLD", "ADD", "TRIM", "EXIT", "REVIEW"]
+    confidence: Confidence
+    reasons: list[Reason] = Field(min_length=1)
+    criteria: list[CriterionCheck] = []
+    triggers: list[TriggerResult] = []
+    thesis_status: Literal["intact", "weakened", "broken", "unknown"]
+    valuation_stretch: bool | None = None
+    tax_note: str = ""
+    override_reason: str = ""
+    overrides: list[str] = []
+    evidence: list[Evidence] = []
+
+
+class ThesisDraft(_M):
+    """A drafted thesis for the owner to accept, edit or skip (ST-8.1)."""
 
     schema_version: Literal[1] = 1
     security_id: int
     as_of: date
-    action: Literal["keep", "add", "trim", "exit", "review"]
-    thesis_status: Literal["intact", "weakened", "broken", "unknown"]
-    kill_criteria_hit: list[str] = []
-    valuation_stretch: bool | None = None
-    tax_note: str = ""
-    evidence: list[Evidence] = []
+    horizon: Horizon
+    why: str
+    kill_criteria: list[KillCriterion]
+    evidence: list[ViewRef] = Field(min_length=1)
+    data_gaps: list[str] = []
+
+    @field_validator("why")
+    @classmethod
+    def _why(cls, v: str) -> str:
+        return check_why(v)
+
+    @field_validator("kill_criteria")
+    @classmethod
+    def _criteria(cls, v: list[KillCriterion]) -> list[KillCriterion]:
+        return check_criteria(v)
 
 
 class EntryZone(_M):
@@ -240,7 +307,7 @@ class CommitteeVerdict(_M):
     security_id: int
     as_of: date
     verdict: VerdictLabel
-    horizon: Literal["positional_1_6m", "long_term_1y_plus"]
+    horizon: Horizon
     conviction: Confidence
     suggested_weight_pct: Decimal | None = None
     entry_zone: EntryZone | None = None
@@ -263,6 +330,7 @@ MODELS: dict[str, type[BaseModel]] = {
     "RiskAssessment": RiskAssessment,
     "HoldingReview": HoldingReview,
     "Verdict": CommitteeVerdict,
+    "ThesisDraft": ThesisDraft,
 }
 
 
