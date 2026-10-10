@@ -9,6 +9,7 @@ from nivesh_agents.runtime import run_command, safe_error
 from nivesh_cli.common import settings_of, user_errors
 from nivesh_cli.holdings import holdings_app
 from nivesh_cli.market import market_app, master_app
+from nivesh_cli.mf import mf_app
 from nivesh_core.config import Settings, load_settings
 from nivesh_core.cost import gate, month_to_date
 from nivesh_core.db import init_stores
@@ -30,6 +31,7 @@ app.add_typer(secrets_app, name="secrets")
 app.registered_commands.extend(holdings_app.registered_commands)  # login, sync, ingest, ...
 app.add_typer(master_app, name="master")
 app.add_typer(market_app, name="market")
+app.add_typer(mf_app, name="mf")
 
 
 @app.callback()

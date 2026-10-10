@@ -217,7 +217,7 @@ def ingest_prices(
     if start > end:
         raise NiveshError(f"start {start} is after end {end}")
     if sec.asset_class == "mf":
-        raise NiveshError(f"{sec.symbol} is a mutual fund; NAVs come from holdings ingest")
+        raise NiveshError(f"{sec.symbol} is a mutual fund; NAVs come from `nivesh mf nav`")
     cal = calendar_for(sec.market, settings)
     days = cal.sessions(start, end)  # CalendarUnknown for an NSE year without holiday data
     run = Run(duck, settings, refresh)

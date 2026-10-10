@@ -1,0 +1,5 @@
+Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Net Asset Value;Date
+
+Example Mutual Fund
+100001;INF000A01011;INF000A01029;Example Bluechip Fund - Growth;46.5000;12-Jan-2026
+xyz;INF111B01012;-;Example Flexi Fund;120.5000;12-Jan-2026

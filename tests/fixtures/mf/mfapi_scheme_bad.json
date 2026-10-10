@@ -1,0 +1,8 @@
+{
+  "meta": {"scheme_code": 100001, "scheme_name": "Example Bluechip Fund - Growth"},
+  "data": [
+    {"date": "09-01-2026", "nav": "46.1200"},
+    {"date": "08-01-2026", "nav": "0.0000"}
+  ],
+  "status": "SUCCESS"
+}

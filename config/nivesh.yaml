@@ -56,3 +56,26 @@ market:
   # NSE circular (lunar holidays are missing here); a year with no entry fails loudly.
   nse_holidays:
     2026: [2026-01-26, 2026-05-01, 2026-08-15, 2026-10-02, 2026-12-25]
+
+# E5 mutual funds: owner-set parameters, example only (nothing here is advice). Wire formats of
+# MFapi.in, AMFI NAVAll and the monthly-holdings source are per spec, unverified. The holdings
+# source credential, if any, is a ref: name (`nivesh secrets set MFDATA_API_KEY`), never a value.
+mf:
+  sources: {nav_primary: mfapi, nav_fallback: amfi}
+  holdings_source: fixture      # mfdata | amc | fixture
+  holdings_api_ref: ref:MFDATA_API_KEY
+  nav_gap_days: 5               # flag a run of more than this many missing weekdays
+  nav_tolerance: 0.005          # cross-source NAV disagreement flag (fraction)
+  mar_pct: 0                    # Sortino minimum acceptable return, annual percent
+  consistency: {window_days: [1095, 1826], min_beat_pct: 50, min_median_excess_pct: 0}
+  thresholds:
+    ter_excess_pct: 0
+    overlap_pct: 60
+    downside_capture_max: 100
+    max_drawdown_pct: 35
+    min_tenure_years: 2
+    valuation_stretch_ratio: 1.25
+  benchmarks: {"Example Equity Index": "EXAMPLE INDEX"}   # fund benchmark text -> index symbol
+  exit_load: {}                 # e.g. {"Equity: Large Cap": {percent: 1, days: 365}}
+  tax: {}                       # long_term_days, short_rate_pct, long_rate_pct (unset: gain and days only)
+  screen: {weights: {consistency: 1, downside: 1, cost: 1, valuation: 1}, universe: []}

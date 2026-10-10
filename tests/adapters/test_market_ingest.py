@@ -214,7 +214,7 @@ def test_ingest_rejects_bad_range_mf_and_unknown_calendar_year(env: Env) -> None
     feed = india_feed()
     with pytest.raises(NiveshError, match="after end"):
         run_in(env, feed, IN_DAYS[1], IN_DAYS[0])
-    with pytest.raises(NiveshError, match="mutual fund"):
+    with pytest.raises(NiveshError, match="mutual fund.*nivesh mf nav"):
         ingest_prices(
             env.duck, env.settings, env.sec("SCHEMEX"), IN_DAYS[0], IN_DAYS[1], **adapters(feed)
         )

@@ -286,6 +286,7 @@ PREFILTER_CAP = 300  # rows scored per fuzzy lookup
 MIN_SCORE = 0.5  # below this a name is not even a candidate
 ACCEPT_SCORE, ACCEPT_GAP = 0.92, 0.05
 _ISIN_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
+_NON_GROWTH = re.compile(r"(?i)\b(idcw|payout|dividend|reinvest\w*)\b")
 _SEC_COLS = "id, symbol, exchange, name, isin, currency, asset_class, market, sector, industry"
 
 
@@ -352,6 +353,27 @@ class SecurityMaster:
     def by_symbol(self, symbol: str, market: str | None = None) -> list[SecurityRow]:
         found = self._rows("UPPER(symbol) = UPPER(?)", (symbol,), market)
         return found or self._via_alias("symbol", symbol.upper(), market)
+
+    def by_amfi_code(self, amfi_code: str) -> SecurityRow | None:
+        """The MF row for an AMFI scheme code. A scheme has one row per ISIN (growth and
+        reinvest/payout): the growth-looking one wins, else the lowest id (a stable answer)."""
+        rows = self._rows("amfi_code = ?", (amfi_code.strip(),), None)
+        rows.sort(key=lambda r: (bool(_NON_GROWTH.search(r.name or "")), r.id))
+        return rows[0] if rows else None
+
+    def by_isin(self, isin: str) -> list[SecurityRow]:
+        """Rows holding this ISIN (or whose old ISIN aliases to it); no fuzzy fallback."""
+        q = isin.strip().upper()
+        return self._rows("isin = ?", (q,), None) or self._via_alias("isin", q, None)
+
+    def mf_schemes(self) -> list[tuple[str, SecurityRow]]:
+        """(AMFI code, row) per scheme, the `by_amfi_code` row, ordered by code."""
+        codes = self.conn.execute(
+            "SELECT DISTINCT amfi_code FROM security WHERE amfi_code IS NOT NULL "
+            "AND asset_class = 'mf' AND unresolved = 0 ORDER BY amfi_code"
+        ).fetchall()
+        found = ((str(c[0]), self.by_amfi_code(str(c[0]))) for c in codes)
+        return [(code, row) for code, row in found if row is not None]
 
     def alias_of(self, security_id: int, kind: str) -> str | None:
         row = self.conn.execute(

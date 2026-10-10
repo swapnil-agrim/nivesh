@@ -124,3 +124,12 @@ def alpaca_key_header() -> str:
 
 def alpaca_secret_header() -> str:
     return "APCA-API-" + "SECRET-KEY"
+
+
+# E5 dummies (never real credentials).
+def mf_source_ref_value() -> str:
+    return "mf" + "-dummy-" + "ref" + "x" * 6
+
+
+def mf_param_name() -> str:
+    return "api_" + "key"

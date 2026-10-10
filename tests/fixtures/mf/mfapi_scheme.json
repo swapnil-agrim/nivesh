@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "fund_house": "Example Mutual Fund",
+    "scheme_type": "Open Ended Schemes",
+    "scheme_category": "Equity Scheme - Large Cap Fund",
+    "scheme_code": 100001,
+    "scheme_name": "Example Bluechip Fund - Growth"
+  },
+  "data": [
+    {"date": "12-01-2026", "nav": "46.5000"},
+    {"date": "09-01-2026", "nav": "46.1200"},
+    {"date": "08-01-2026", "nav": "45.9000"},
+    {"date": "07-01-2026", "nav": "45.5000"},
+    {"date": "06-01-2026", "nav": "45.3000"},
+    {"date": "05-01-2026", "nav": "45.1234"}
+  ],
+  "status": "SUCCESS"
+}

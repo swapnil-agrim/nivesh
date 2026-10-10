@@ -300,3 +300,112 @@ async def test_us_holdings_pipeline_leaves_no_pii_anywhere(
             assert secret_value not in text, (label, secret_value)
     raw = open(data / "nivesh.duckdb", "rb").read()
     assert dummy_id.encode() not in raw and dummy_pw.encode() not in raw
+
+
+def test_mf_pipeline_leaves_no_pii_anywhere(
+    cli_env: tuple[list[str], Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MF fixtures -> nav/meta/holdings/returns/overlap/doctor/discover -> SQLite and DuckDB
+    dumps (cache included) and all CLI output are scan-clean; the holdings credential, supplied
+    only as a reference, is sent as a header and appears nowhere else."""
+    import json
+    import sqlite3
+
+    import duckdb
+    from typer.testing import CliRunner
+
+    import nivesh_cli.mf as cmf
+    from nivesh_adapters.mf_data import MfHoldingsClient, MfMetaClient
+    from nivesh_adapters.nav import AmfiNavAll, MfapiClient
+    from nivesh_cli.main import app
+    from nivesh_core.db import init_stores
+    from nivesh_core.db.sqlite import open_sqlite
+    from nivesh_core.security_master import build_master
+    from tests.market_fx import mrow
+    from tests.mf_fx import FX, G, Net
+
+    args, data = cli_env
+    cfg = Path(args[1]) / "nivesh.yaml"
+    cfg.write_text(cfg.read_text().replace("holdings_source: fixture", "holdings_source: mfdata"))
+    monkeypatch.setenv("MFDATA_API_KEY", pv.mf_source_ref_value())
+    init_stores(data)
+    sql = open_sqlite(data / "nivesh.sqlite")
+    build_master(
+        sql,
+        [
+            mrow(
+                G, "AMFI", isin=G, asset_class="mf", amfi_code="100001", name="Example Fund Growth"
+            ),
+            mrow("INE000A01010", name="Example Alpha Industries"),
+            mrow("INE111A01011", name="Example Beta Bank"),
+        ],
+        [],
+    )
+    sql.close()
+    feed = Net(
+        mfapi={"100001": json.loads((FX / "mfapi_scheme.json").read_text())},
+        meta={"100001": json.loads((FX / "meta.json").read_text())},
+        holdings={"100001": json.loads((FX / "holdings_12m.json").read_text())},
+    )
+    monkeypatch.setattr(cmf, "_mfapi", lambda: MfapiClient(feed.client()))
+    monkeypatch.setattr(cmf, "_navall", lambda: AmfiNavAll(feed.client()))
+    monkeypatch.setattr(cmf, "_meta_client", lambda: MfMetaClient(feed.client()))
+    monkeypatch.setattr(
+        cmf, "_holdings_client",
+        lambda source, ref: MfHoldingsClient(feed.client(), source=source, key_ref=ref),
+    )  # fmt: skip
+    runner = CliRunner()
+    outputs = []
+    for cmd in (
+        ["mf", "nav", "100001"], ["mf", "meta", "100001"], ["mf", "holdings", "100001"],
+        ["mf", "returns", "100001"], ["mf", "doctor"],
+        ["mf", "discover", "--category", "Large Cap"],
+    ):  # fmt: skip
+        r = runner.invoke(app, [*args, *cmd])
+        assert r.exit_code in (0, 1), (cmd, r.output)  # doctor exits 1: nothing is held
+        outputs.append(r.output)
+    dummy_ref = pv.mf_source_ref_value()
+    sent = [v for req in feed.requests for v in req.headers.values()]
+    assert dummy_ref in sent, "control: the credential was used for the request"
+    assert not any(dummy_ref in str(req.url) for req in feed.requests)
+
+    s = sqlite3.connect(data / "nivesh.sqlite")
+    sqlite_dump = "\n".join(s.iterdump())
+    s.close()
+    d = duckdb.connect(str(data / "nivesh.duckdb"), read_only=True)
+    parts = []
+    for (table,) in d.execute("show tables").fetchall():
+        cols = [c[0] for c in d.execute(f"describe {table}").fetchall()]  # noqa: S608
+        if table == "cache_entry":  # the params hash is hex digest noise, not data
+            cols = [c for c in cols if c != "params_hash"]
+        parts.append(str(d.execute(f"select {', '.join(cols)} from {table}").fetchall()))  # noqa: S608
+    duck_dump = "\n".join(parts)
+    d.close()
+    files = "\n".join(
+        p.read_text(errors="ignore")
+        for p in data.rglob("*")
+        if p.is_file() and p.suffix in {".json", ".jsonl", ".txt", ".log"}
+    )
+    texts = {"sqlite": sqlite_dump, "duckdb": duck_dump, "files": files, "cli": "\n".join(outputs)}
+    for label, text in texts.items():
+        found = scan_text(text)
+        assert found == [], (label, [text[f.start - 30 : f.end + 5] for f in found])
+        assert dummy_ref not in text, label
+        assert pv.mf_param_name() not in text, label
+    assert "added 6" in outputs[0] and "months stored 12" in outputs[2]
+
+
+def test_mf_fixtures_and_config_have_no_key_shaped_literals() -> None:
+    root = Path(__file__).resolve().parents[2]
+    files = [*sorted((root / "tests" / "fixtures" / "mf").glob("*")), root / "tests" / "mf_fx.py"]
+    files += [root / "docs" / "adr" / "0007-mutual-fund-intelligence.md"]
+    texts = {f.name: f.read_text() for f in files}
+    block = (root / "config" / "nivesh.yaml").read_text().split("\nmf:\n", 1)[1]
+    texts["nivesh.yaml mf block"] = block
+    shaped = re.compile(
+        r"(?i)\b(api[_-]?key|apikey|token|secret|password)\b\s*[:=]\s*['\"]?[A-Za-z0-9+/_-]{6,}"
+        r"|[A-Za-z0-9+/]{32,}"
+    )
+    for name, text in texts.items():
+        assert shaped.search(text) is None, name
+    assert "ref:MFDATA_API_KEY" in block and scan_paths([root / "tests" / "fixtures" / "mf"]) == []

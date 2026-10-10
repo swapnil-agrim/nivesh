@@ -242,3 +242,73 @@ def test_us_holdings_modules_use_no_write_verbs_in_names_or_docstrings() -> None
                 assert not is_write_name(node.name), (mod, node.name)
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Module):
                 assert _desc_write_words(ast.get_docstring(node) or "") == [], (mod, node)
+
+
+MF_ADAPTERS = {"MfapiClient", "AmfiNavAll", "MfMetaClient", "MfHoldingsClient"}
+MF_MODULES = [
+    "nivesh_adapters/nav.py", "nivesh_adapters/mf_data.py", "nivesh_adapters/mf_ingest.py",
+    "nivesh_adapters/mf_report.py", "nivesh_cli/mf.py", "nivesh_core/mf_models.py",
+    "nivesh_core/mf_store.py", "nivesh_engine/mf_returns.py", "nivesh_engine/mf_valuation.py",
+    "nivesh_engine/mf_overlap.py", "nivesh_engine/mf_cost.py", "nivesh_engine/mf_lots.py",
+    "nivesh_engine/fund_doctor.py", "nivesh_engine/fund_screen.py",
+]  # fmt: skip
+
+
+def test_safety_discovery_finds_mf_adapters() -> None:
+    found = {c.__name__: c for c in discover_adapter_classes()}
+    assert MF_ADAPTERS <= set(found)  # a module move must not drop an MF source from the check
+    for name in MF_ADAPTERS:
+        assert issubclass(found[name], Adapter), name
+
+
+def test_mf_adapters_have_no_write_methods() -> None:
+    found = {c.__name__: c for c in discover_adapter_classes()}
+    for name in MF_ADAPTERS:
+        assert write_methods(found[name]) == [], name
+        assert {n for n in dir(found[name]) if not n.startswith("_")} == {
+            "fetch", "name", "source", "validate",
+        }, name  # fmt: skip
+
+
+def test_mf_engine_and_cli_public_names_have_no_write_words() -> None:
+    import ast
+
+    from nivesh_mcp.base import _desc_write_words
+
+    for mod in MF_MODULES:
+        tree = ast.parse((ROOT / mod).read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                assert not is_write_name(node.name), (mod, node.name)
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Module):
+                assert _desc_write_words(ast.get_docstring(node) or "") == [], (mod, node)
+
+
+def test_mf_cli_commands_have_no_write_verb() -> None:
+    from nivesh_cli.mf import mf_app
+
+    names = [
+        c.name or (c.callback.__name__ if c.callback else "") for c in mf_app.registered_commands
+    ]
+    assert set(names) == {
+        "nav", "meta", "holdings", "returns", "overlap", "doctor", "discover",
+    }  # fmt: skip
+    assert not [n for n in names if is_write_name(n)]
+
+
+def test_holdings_server_still_has_eight_tools_and_no_mf_server_registered() -> None:
+    assert len(SERVERS["holdings"].tool_names) == 8
+    # E5 ships through the CLI: the registered servers are exactly the pre-E5 set
+    assert set(SERVERS) == {
+        "demo",
+        "filings",
+        "fundamentals",
+        "holdings",
+        "macro",
+        "market",
+        "news",
+    }
+    cfg = json.loads((ROOT / ".mcp.json").read_text())
+    assert not [n for n in cfg["mcpServers"] if re.search(r"(^|[_-])(mf|mutual|funds?)($|[_-])", n)]
+    allow = json.loads((ROOT / ".claude" / "settings.json").read_text())["permissions"]["allow"]
+    assert not [a for a in allow if re.search(r"__(mf|mutual|funds?)(_|$)", a)]

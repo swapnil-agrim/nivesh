@@ -1,0 +1,473 @@
+{
+ "amfi_code": "100001",
+ "months": [
+  {
+   "month_end": "2025-01-31",
+   "holdings": [
+    {
+     "isin": "INE000A01010",
+     "name": "Example Alpha Industries",
+     "weight_pct": "30.50",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE111A01011",
+     "name": "Example Beta Bank",
+     "weight_pct": "25.25",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE222B01012",
+     "name": "Example Gamma Tech",
+     "weight_pct": "20.10",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE999Z01019",
+     "name": "Example Unlisted Co",
+     "weight_pct": "10.05",
+     "asset_type": "equity"
+    },
+    {
+     "label": "Cash and equivalents",
+     "weight_pct": "9.50",
+     "asset_type": "cash"
+    },
+    {
+     "label": "Index futures",
+     "weight_pct": "4.60",
+     "asset_type": "derivative"
+    }
+   ]
+  },
+  {
+   "month_end": "2025-02-28",
+   "holdings": [
+    {
+     "isin": "INE000A01010",
+     "name": "Example Alpha Industries",
+     "weight_pct": "30.50",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE111A01011",
+     "name": "Example Beta Bank",
+     "weight_pct": "25.25",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE222B01012",
+     "name": "Example Gamma Tech",
+     "weight_pct": "20.10",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE999Z01019",
+     "name": "Example Unlisted Co",
+     "weight_pct": "10.05",
+     "asset_type": "equity"
+    },
+    {
+     "label": "Cash and equivalents",
+     "weight_pct": "9.50",
+     "asset_type": "cash"
+    },
+    {
+     "label": "Index futures",
+     "weight_pct": "4.60",
+     "asset_type": "derivative"
+    }
+   ]
+  },
+  {
+   "month_end": "2025-03-31",
+   "holdings": [
+    {
+     "isin": "INE000A01010",
+     "name": "Example Alpha Industries",
+     "weight_pct": "30.50",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE111A01011",
+     "name": "Example Beta Bank",
+     "weight_pct": "25.25",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE222B01012",
+     "name": "Example Gamma Tech",
+     "weight_pct": "20.10",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE999Z01019",
+     "name": "Example Unlisted Co",
+     "weight_pct": "10.05",
+     "asset_type": "equity"
+    },
+    {
+     "label": "Cash and equivalents",
+     "weight_pct": "9.50",
+     "asset_type": "cash"
+    },
+    {
+     "label": "Index futures",
+     "weight_pct": "4.60",
+     "asset_type": "derivative"
+    }
+   ]
+  },
+  {
+   "month_end": "2025-04-30",
+   "holdings": [
+    {
+     "isin": "INE000A01010",
+     "name": "Example Alpha Industries",
+     "weight_pct": "30.50",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE111A01011",
+     "name": "Example Beta Bank",
+     "weight_pct": "25.25",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE222B01012",
+     "name": "Example Gamma Tech",
+     "weight_pct": "20.10",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE999Z01019",
+     "name": "Example Unlisted Co",
+     "weight_pct": "10.05",
+     "asset_type": "equity"
+    },
+    {
+     "label": "Cash and equivalents",
+     "weight_pct": "9.50",
+     "asset_type": "cash"
+    },
+    {
+     "label": "Index futures",
+     "weight_pct": "4.60",
+     "asset_type": "derivative"
+    }
+   ]
+  },
+  {
+   "month_end": "2025-05-31",
+   "holdings": [
+    {
+     "isin": "INE000A01010",
+     "name": "Example Alpha Industries",
+     "weight_pct": "30.50",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE111A01011",
+     "name": "Example Beta Bank",
+     "weight_pct": "25.25",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE222B01012",
+     "name": "Example Gamma Tech",
+     "weight_pct": "20.10",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE999Z01019",
+     "name": "Example Unlisted Co",
+     "weight_pct": "10.05",
+     "asset_type": "equity"
+    },
+    {
+     "label": "Cash and equivalents",
+     "weight_pct": "9.50",
+     "asset_type": "cash"
+    },
+    {
+     "label": "Index futures",
+     "weight_pct": "4.60",
+     "asset_type": "derivative"
+    }
+   ]
+  },
+  {
+   "month_end": "2025-06-30",
+   "holdings": [
+    {
+     "isin": "INE000A01010",
+     "name": "Example Alpha Industries",
+     "weight_pct": "30.50",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE111A01011",
+     "name": "Example Beta Bank",
+     "weight_pct": "25.25",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE222B01012",
+     "name": "Example Gamma Tech",
+     "weight_pct": "20.10",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE999Z01019",
+     "name": "Example Unlisted Co",
+     "weight_pct": "10.05",
+     "asset_type": "equity"
+    },
+    {
+     "label": "Cash and equivalents",
+     "weight_pct": "9.50",
+     "asset_type": "cash"
+    },
+    {
+     "label": "Index futures",
+     "weight_pct": "4.60",
+     "asset_type": "derivative"
+    }
+   ]
+  },
+  {
+   "month_end": "2025-07-31",
+   "holdings": [
+    {
+     "isin": "INE000A01010",
+     "name": "Example Alpha Industries",
+     "weight_pct": "30.50",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE111A01011",
+     "name": "Example Beta Bank",
+     "weight_pct": "25.25",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE222B01012",
+     "name": "Example Gamma Tech",
+     "weight_pct": "20.10",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE999Z01019",
+     "name": "Example Unlisted Co",
+     "weight_pct": "10.05",
+     "asset_type": "equity"
+    },
+    {
+     "label": "Cash and equivalents",
+     "weight_pct": "9.50",
+     "asset_type": "cash"
+    },
+    {
+     "label": "Index futures",
+     "weight_pct": "4.60",
+     "asset_type": "derivative"
+    }
+   ]
+  },
+  {
+   "month_end": "2025-08-31",
+   "holdings": [
+    {
+     "isin": "INE000A01010",
+     "name": "Example Alpha Industries",
+     "weight_pct": "30.50",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE111A01011",
+     "name": "Example Beta Bank",
+     "weight_pct": "25.25",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE222B01012",
+     "name": "Example Gamma Tech",
+     "weight_pct": "20.10",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE999Z01019",
+     "name": "Example Unlisted Co",
+     "weight_pct": "10.05",
+     "asset_type": "equity"
+    },
+    {
+     "label": "Cash and equivalents",
+     "weight_pct": "9.50",
+     "asset_type": "cash"
+    },
+    {
+     "label": "Index futures",
+     "weight_pct": "4.60",
+     "asset_type": "derivative"
+    }
+   ]
+  },
+  {
+   "month_end": "2025-09-30",
+   "holdings": [
+    {
+     "isin": "INE000A01010",
+     "name": "Example Alpha Industries",
+     "weight_pct": "30.50",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE111A01011",
+     "name": "Example Beta Bank",
+     "weight_pct": "25.25",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE222B01012",
+     "name": "Example Gamma Tech",
+     "weight_pct": "20.10",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE999Z01019",
+     "name": "Example Unlisted Co",
+     "weight_pct": "10.05",
+     "asset_type": "equity"
+    },
+    {
+     "label": "Cash and equivalents",
+     "weight_pct": "9.50",
+     "asset_type": "cash"
+    },
+    {
+     "label": "Index futures",
+     "weight_pct": "4.60",
+     "asset_type": "derivative"
+    }
+   ]
+  },
+  {
+   "month_end": "2025-10-31",
+   "holdings": [
+    {
+     "isin": "INE000A01010",
+     "name": "Example Alpha Industries",
+     "weight_pct": "30.50",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE111A01011",
+     "name": "Example Beta Bank",
+     "weight_pct": "25.25",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE222B01012",
+     "name": "Example Gamma Tech",
+     "weight_pct": "20.10",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE999Z01019",
+     "name": "Example Unlisted Co",
+     "weight_pct": "10.05",
+     "asset_type": "equity"
+    },
+    {
+     "label": "Cash and equivalents",
+     "weight_pct": "9.50",
+     "asset_type": "cash"
+    },
+    {
+     "label": "Index futures",
+     "weight_pct": "4.60",
+     "asset_type": "derivative"
+    }
+   ]
+  },
+  {
+   "month_end": "2025-11-30",
+   "holdings": [
+    {
+     "isin": "INE000A01010",
+     "name": "Example Alpha Industries",
+     "weight_pct": "30.50",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE111A01011",
+     "name": "Example Beta Bank",
+     "weight_pct": "25.25",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE222B01012",
+     "name": "Example Gamma Tech",
+     "weight_pct": "20.10",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE999Z01019",
+     "name": "Example Unlisted Co",
+     "weight_pct": "10.05",
+     "asset_type": "equity"
+    },
+    {
+     "label": "Cash and equivalents",
+     "weight_pct": "9.50",
+     "asset_type": "cash"
+    },
+    {
+     "label": "Index futures",
+     "weight_pct": "4.60",
+     "asset_type": "derivative"
+    }
+   ]
+  },
+  {
+   "month_end": "2025-12-31",
+   "holdings": [
+    {
+     "isin": "INE000A01010",
+     "name": "Example Alpha Industries",
+     "weight_pct": "30.50",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE111A01011",
+     "name": "Example Beta Bank",
+     "weight_pct": "25.25",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE222B01012",
+     "name": "Example Gamma Tech",
+     "weight_pct": "20.10",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE999Z01019",
+     "name": "Example Unlisted Co",
+     "weight_pct": "10.05",
+     "asset_type": "equity"
+    },
+    {
+     "label": "Cash and equivalents",
+     "weight_pct": "9.50",
+     "asset_type": "cash"
+    },
+    {
+     "label": "Index futures",
+     "weight_pct": "4.60",
+     "asset_type": "derivative"
+    }
+   ]
+  }
+ ]
+}

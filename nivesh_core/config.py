@@ -180,6 +180,104 @@ class TaxSettings(BaseModel):
     us_long_term_days: int | None = Field(default=None, gt=0)
 
 
+class MfSources(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    nav_primary: Literal["mfapi", "amfi"] = "mfapi"
+    nav_fallback: Literal["mfapi", "amfi", "none"] = "amfi"
+
+
+class MfConsistency(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    window_days: list[int] = [1095, 1826]  # 3y and 5y rolling windows
+    min_beat_pct: Decimal = Decimal("50")
+    min_median_excess_pct: Decimal = Decimal("0")
+
+    @field_validator("window_days")
+    @classmethod
+    def _windows(cls, v: list[int]) -> list[int]:
+        if not v or any(w <= 0 for w in v):
+            raise ValueError("must be a non-empty list of positive day counts")
+        return v
+
+
+class MfThresholds(BaseModel):
+    """Fund-doctor thresholds. Owner-set; no rule hard-codes a number."""
+
+    model_config = ConfigDict(extra="forbid")
+    ter_excess_pct: Decimal = Decimal("0")  # minimum regular-vs-direct TER gap to act on
+    overlap_pct: Decimal = Decimal("60")
+    downside_capture_max: Decimal = Decimal("100")  # percent of the benchmark's down-day move
+    max_drawdown_pct: Decimal = Decimal("35")
+    min_tenure_years: Decimal = Decimal("2")
+    valuation_stretch_ratio: Decimal = Decimal("1.25")  # current multiple / own median
+
+
+class ExitLoad(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    percent: Decimal = Field(ge=0, le=100)
+    days: int = Field(gt=0)
+
+
+class MfTax(BaseModel):
+    """Owner-set tax parameters; unset means gain and days only. No tax advice."""
+
+    model_config = ConfigDict(extra="forbid")
+    long_term_days: int | None = Field(default=None, gt=0)
+    short_rate_pct: Decimal | None = Field(default=None, ge=0, le=100)
+    long_rate_pct: Decimal | None = Field(default=None, ge=0, le=100)
+
+
+class MfScreenWeights(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    consistency: Decimal = Field(default=Decimal("1"), ge=0)
+    downside: Decimal = Field(default=Decimal("1"), ge=0)
+    cost: Decimal = Field(default=Decimal("1"), ge=0)
+    valuation: Decimal = Field(default=Decimal("1"), ge=0)
+
+
+class MfScreen(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    weights: MfScreenWeights = MfScreenWeights()
+    universe: list[str] = []  # extra AMFI codes to screen beyond the stored schemes
+
+
+class MfSettings(BaseModel):
+    """E5 mutual funds. All numbers are owner-set parameters. Source wire formats are per spec,
+    unverified against live sources. The holdings source credential is a reference only."""
+
+    model_config = ConfigDict(extra="forbid")
+    sources: MfSources = MfSources()
+    holdings_source: Literal["mfdata", "amc", "fixture"] = "mfdata"
+    holdings_api_ref: str = "ref:MFDATA_API_KEY"
+    nav_gap_days: int = Field(default=5, gt=0)
+    nav_tolerance: Decimal = Decimal("0.005")
+    min_alignment_pct: Decimal = Field(default=Decimal("80"), gt=0, le=100)
+    min_valuation_coverage_pct: Decimal = Field(default=Decimal("60"), gt=0, le=100)
+    mar_pct: Decimal = Decimal("0")  # Sortino minimum acceptable return, annual percent
+    max_nav_age_days: int = Field(default=10, gt=0)  # older latest NAV: value and gain unavailable
+    consistency: MfConsistency = MfConsistency()
+    thresholds: MfThresholds = MfThresholds()
+    benchmarks: dict[str, str] = {}  # fund_meta.benchmark text -> index security symbol
+    exit_load: dict[str, ExitLoad] = {}
+    tax: MfTax = MfTax()
+    screen: MfScreen = MfScreen()
+
+    @field_validator("nav_tolerance", mode="before")
+    @classmethod
+    def _tol(cls, v: Any) -> Decimal:
+        d = Decimal(str(v))
+        if not (0 < d <= Decimal("0.5")):
+            raise ValueError("must be > 0 and <= 0.5")
+        return d
+
+    @field_validator("holdings_api_ref")
+    @classmethod
+    def _ref(cls, v: str) -> str:
+        if not REF_RE.match(v):
+            raise ValueError("must be a reference such as 'ref:NAME'")
+        return v
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["dev", "prod"] = "dev"
@@ -195,6 +293,7 @@ class Settings(BaseModel):
     market: MarketSettings = MarketSettings()
     tax: TaxSettings = TaxSettings()
     us_broker: UsBrokerSettings = UsBrokerSettings()
+    mf: MfSettings = MfSettings()
 
     @field_validator("registered_ip")
     @classmethod
