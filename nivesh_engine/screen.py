@@ -194,8 +194,10 @@ def screen(
     *,
     as_of: date,
     cfg: AnalysisSettings,
+    basis: str | None = None,
 ) -> ScreenResult:
-    """Matches with the values that passed, and the skipped and rejected rules, by security id."""
+    """Matches with the values that passed, and the skipped and rejected rules, by security id.
+    `basis` describes a named universe; without it the universe is an explicit id list."""
     if len(universe) > cfg.screen.max_universe:
         raise ValueError(
             f"universe of {len(universe)} exceeds analysis.screen.max_universe "
@@ -250,7 +252,7 @@ def screen(
         for r in rules.rules
         if not r.required and (t := tally[r.id]).evaluated and t.unavailable == t.evaluated
     )
-    basis = (
+    basis = basis or (
         f"explicit list of {len(universe)} securities supplied by the caller (no investable "
         "universe is defined yet); universe-relative metrics such as rs_percentile are ranked "
         "within it"

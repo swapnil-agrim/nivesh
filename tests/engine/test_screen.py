@@ -218,7 +218,7 @@ EXPECTED_METRICS = {
     "car_pct",
     # ST-6.4 valuation
     "pe", "pb", "ev_ebitda", "fcf_yield_pct", "dividend_yield_pct", "valuation_percentile",
-    "pe_vs_peer_median_pct",
+    "pe_vs_peer_median_pct", "market_cap",
     # estimates, flags, setups and the universe (ST-6.8, ST-9.2)
     "revisions", "hard_flag_count", "soft_flag_count", "setup_type", "base_breakout",
     "pullback_to_50dma", "rs_percentile",

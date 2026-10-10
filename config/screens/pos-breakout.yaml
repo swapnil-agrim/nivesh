@@ -1,0 +1,7 @@
+# Positional: a base breakout with strong relative strength. Example thresholds you own and tune;
+# not advice. The technical rules never stand alone: a fundamentals rule is required (BR-12).
+name: pos-breakout
+rules:
+  - {id: sound_business, metric: roe, op: ">=", value: 10, required: true}
+  - {id: breakout_setup, metric: base_breakout, op: "==", value: 1, required: true}
+  - {id: relative_strength, metric: rs_percentile, op: ">=", value: 70}

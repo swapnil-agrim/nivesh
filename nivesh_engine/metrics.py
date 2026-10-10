@@ -276,6 +276,15 @@ def _valuation_percentile(b: Bundles) -> Cell:
     return _gone("; ".join(why))
 
 
+def _market_cap(b: Bundles) -> Cell:
+    result = b.valuation()
+    if result is None:
+        return _gone("valuation inputs not loaded")
+    if result.market_cap is None:
+        return _gone("no stored close" if result.price is None else "no shares_out filed")
+    return Cell(result.market_cap, None, {"price": str(result.price)})
+
+
 def _peer_discount(b: Bundles) -> Cell:
     result = b.valuation()
     if result is None:
@@ -390,6 +399,9 @@ def _build() -> dict[str, MetricDef]:
             frozenset(("statements", "closes")),
             _valuation_percentile,
         )
+    )
+    defs.append(
+        MetricDef("market_cap", "valuation", "numeric", frozenset(VALUATION_NEEDS), _market_cap)
     )
     defs.append(
         MetricDef(

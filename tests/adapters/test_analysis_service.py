@@ -223,6 +223,21 @@ def test_risk_facts_for_a_candidate_over_the_position_limit_sector_limit_exclude
     assert capped.tested_weight_pct == D(1)  # min(starter weight, profile max position)
 
 
+def test_risk_veto_and_universe_filter_use_the_same_helper(st: Stores) -> None:
+    from nivesh_engine import universe as engine_universe
+
+    sec = svc.resolve_security(st.sql, "US2")  # sector "Tech"
+    for ex in (["tech"], ["us2"], ["Example Tech 2"], ["nothing"]):
+        prof = make_profile(exclusions=ex)
+        want = engine_universe.matches_exclusion(ex, sec.symbol, sec.isin, sec.name, sec.sector)
+        assert svc._matches_exclusion(sec, prof) is want
+        got = svc.risk_facts(*args(st), prof, "US2", ASOF, starter_weight_pct=D("2"))
+        assert got.excluded is want
+    assert svc.risk_facts(
+        *args(st), make_profile(exclusions=["Tech"]), "US2", ASOF, starter_weight_pct=D("2")
+    ).excluded  # a sector entry now vetoes, as the universe filter removes it
+
+
 def test_risk_facts_for_a_fund_uses_exclusions_and_position_limit_only(tmp_path: Path) -> None:
     with make_env(tmp_path) as env:
         save_holdings(env, [(G, "100", "1000", {})])

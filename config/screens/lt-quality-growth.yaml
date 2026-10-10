@@ -1,0 +1,8 @@
+# Long-term quality with growth. Example thresholds you own and tune; not advice.
+name: lt-quality-growth
+rules:
+  - {id: quality_roe, metric: roe, op: ">=", value: 15, required: true}
+  - {id: no_hard_red_flag, metric: hard_flag_count, op: "==", value: 0, required: true}
+  - {id: revenue_growth, metric: revenue_cagr, op: ">=", value: 10}
+  - {id: earnings_growth, metric: eps_cagr, op: ">=", value: 10}
+  - {id: estimates_not_cut, metric: revisions, op: ">=", value: 0}

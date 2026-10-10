@@ -34,6 +34,11 @@ def settings_of(ctx: typer.Context) -> Settings:
     return settings
 
 
+def config_dir_of(ctx: typer.Context) -> Path:
+    found: Path = ctx.meta.get("config_dir", Path("config"))
+    return found
+
+
 def profile_of(ctx: typer.Context) -> Profile:
     profile: Profile = ctx.obj[1]
     return profile
