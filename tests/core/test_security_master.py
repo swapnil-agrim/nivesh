@@ -434,3 +434,16 @@ def test_fuzzy_lookup_does_not_write_and_still_finds_rows_without_name_norm(
     assert r.candidates and r.candidates[0].symbol == "OLD"
     assert conn.total_changes == before
     assert conn.execute("SELECT name_norm FROM security WHERE symbol = 'OLD'").fetchone() == (None,)
+
+
+def test_placeholder_merge_repoints_lots(conn: sqlite3.Connection) -> None:
+    real = real_row(conn)
+    p = placeholder(conn)
+    holder(conn, p)
+    conn.execute(
+        "INSERT INTO lot (ingest_id, account_id, security_id, acquired_on, quantity, "
+        "cost_per_unit, currency) VALUES (1, 1, ?, '2026-01-01', '1', '2', 'INR')",
+        (p,),
+    )
+    build_master(conn, [mrow("RELIANCE", isin=X)])
+    assert one(conn, "SELECT security_id FROM lot") == (real,)

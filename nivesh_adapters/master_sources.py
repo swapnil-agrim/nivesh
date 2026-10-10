@@ -18,6 +18,7 @@ from nivesh_adapters.recorder import make_client
 from nivesh_core.errors import SourceUnavailable
 from nivesh_core.secrets import get_secret
 from nivesh_core.security_master import MasterRow
+from nivesh_core.security_resolver import US_EXCHANGE_ALIASES
 from nivesh_core.timeutil import utcnow
 
 URLS = {
@@ -27,7 +28,7 @@ URLS = {
     "sec": "https://www.sec.gov/files/company_tickers_exchange.json",
 }
 EQUITY_SERIES = {"EQ", "BE", "BZ", "SM", "ST"}
-SEC_EXCHANGES = {"NASDAQ": "NASDAQ", "NYSE": "NYSE", "CBOE": "CBOE", "OTC": "OTC"}
+SEC_EXCHANGES = {**US_EXCHANGE_ALIASES, "CBOE": "CBOE", "OTC": "OTC"}
 
 
 def sec_headers() -> dict[str, str]:

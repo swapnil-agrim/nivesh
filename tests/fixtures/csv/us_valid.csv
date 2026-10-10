@@ -1,0 +1,5 @@
+account_label,symbol,exchange,quantity,avg_cost,currency,asset_class,acquired_on
+US Broker,AAPL,NASDAQ,10,150.25,USD,equity,2025-03-14
+US Broker,AAPL,NASDAQ,2.5,170.00,USD,equity,06/20/2025
+US Broker,SPYX,NYSE ARCA,4,92.10,,etf,
+US Broker,MSFT,,3,300,,,2025-01-02

@@ -2,11 +2,16 @@
 
 Deterministic and pure: Decimal only, no I/O, no clock, no randomness (NFR-9).
 
-Rule: key = ISIN (or `symbol:exchange` when a row has none). Rows of one source and key are summed.
+Rule: key = ISIN (or `symbol:exchange` when a row has none; `symbol:CURRENCY` for a non-INR row, so
+one ticker from different sources dedupes whatever exchange label each carried). Rows of one source
+and key are summed.
 Across sources the highest-precedence source (InvestRight > depository CAS > RTA CAS > CSV) supplies
 quantity, price and value; cost comes from the highest-precedence source that has one. If
 `scope_ref` (the holder_ref of the demat linked to InvestRight) is given, depository rows of other
 demats are additional holdings, not duplicates.
+
+Non-INR rows are converted with the `FxResult` passed in (valuation-date rate). Without a rate their
+INR value stays None ("unavailable"): they are excluded from INR totals and weights, never zero.
 """
 
 from collections import defaultdict
@@ -17,6 +22,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict
 
 from nivesh_core.holdings import PRECEDENCE, Holding, PriceBasis, Source
+from nivesh_engine.fx import FxResult, convert_holdings
 
 ZERO = Decimal(0)
 
@@ -34,8 +40,10 @@ class Row(BaseModel):
     avg_cost: Decimal | None
     price: Decimal
     price_basis: PriceBasis
-    value_inr: Decimal
-    weight: Decimal
+    currency: str
+    value_native: Decimal | None
+    value_inr: Decimal | None
+    weight: Decimal | None
     as_of: date
     source: Source
     sources: list[Source]
@@ -61,6 +69,18 @@ class ReconItem(BaseModel):
     cas_as_of: date
 
 
+class Exposure(BaseModel):
+    """Share of the portfolio held in one currency; `pct` (0-100) is None when not computable."""
+
+    model_config = ConfigDict(frozen=True)
+
+    currency: str
+    value_inr: Decimal | None
+    value_native: Decimal | None
+    pct: Decimal | None
+    available: bool
+
+
 class Consolidated(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -73,10 +93,25 @@ class Consolidated(BaseModel):
     reconciliation: list[ReconItem]
     notes: list[str]
     as_of: date | None
+    fx: FxResult | None = None
+    exposure: list[Exposure] = []
 
 
 def _key(h: Holding) -> str:
-    return h.isin or f"{h.symbol}:{h.exchange}"
+    if h.isin:
+        return h.isin
+    return f"{h.symbol}:{h.exchange}" if h.currency == "INR" else f"{h.symbol}:{h.currency}"
+
+
+def _merged_price(
+    rows: Sequence[Holding], qty: Decimal, value: Decimal | None, first: Holding
+) -> Decimal:
+    """INR rows: value / quantity (as E2). Other currencies keep the native price."""
+    if not qty:
+        return first.price
+    if first.currency == "INR" and value is not None:
+        return value / qty
+    return sum((r.quantity * r.price for r in rows), ZERO) / qty
 
 
 def _merge(rows: Sequence[Holding]) -> Holding:
@@ -84,7 +119,8 @@ def _merge(rows: Sequence[Holding]) -> Holding:
     if len(rows) == 1:
         return rows[0]
     qty = sum((r.quantity for r in rows), ZERO)
-    value = sum((r.value_inr for r in rows), ZERO)
+    known = [r.value_inr for r in rows if r.value_inr is not None]
+    value = sum(known, ZERO) if len(known) == len(rows) else None
     costed = [r for r in rows if r.avg_cost is not None]
     cost_qty = sum((r.quantity for r in costed), ZERO)
     cost = (
@@ -98,7 +134,7 @@ def _merge(rows: Sequence[Holding]) -> Holding:
         update={
             "quantity": qty,
             "value_inr": value,
-            "price": value / qty if qty else first.price,
+            "price": _merged_price(rows, qty, value, first),
             "avg_cost": cost,
             "as_of": max(r.as_of for r in rows),
             "holder_ref": first.holder_ref if len(refs) == 1 else "",
@@ -175,10 +211,47 @@ def reconcile(holdings: Sequence[Holding], scope_ref: str | None = None) -> list
     ]
 
 
-def consolidate(holdings: Sequence[Holding], scope_ref: str | None = None) -> Consolidated:
+def _native(h: Holding) -> Decimal | None:
+    return h.value_native if h.currency != "INR" else None
+
+
+def _order(t: tuple[str, Holding, list[Source]]) -> tuple[int, Decimal, str]:
+    v = t[1].value_inr
+    return (0, -v, t[0]) if v is not None else (1, ZERO, t[0])
+
+
+def _exposure(rows: list[Row], total: Decimal) -> list[Exposure]:
+    foreign = [r for r in rows if r.currency != "INR"]
+    if not foreign:
+        return []
+    excluded = any(r.value_inr is None for r in foreign)
+    out: list[Exposure] = []
+    for cur in ["INR", *sorted({r.currency for r in foreign})]:
+        part = [r for r in rows if r.currency == cur]
+        val = sum((r.value_inr for r in part if r.value_inr is not None), ZERO)
+        known = all(r.value_inr is not None for r in part)
+        native = sum((r.value_native for r in part if r.value_native is not None), ZERO)
+        ok = not excluded and known and total > 0
+        out.append(
+            Exposure(
+                currency=cur,
+                value_inr=val if known else None,
+                value_native=native if cur != "INR" else None,
+                pct=val * 100 / total if ok else None,
+                available=ok,
+            )
+        )
+    return out
+
+
+def consolidate(
+    holdings: Sequence[Holding], scope_ref: str | None = None, fx: FxResult | None = None
+) -> Consolidated:
+    if fx is not None:
+        holdings = convert_holdings(holdings, fx)
     merged = _consolidate_rows(holdings, scope_ref)
-    total = sum((h.value_inr for _, h, _ in merged), ZERO)
-    ordered = sorted(merged, key=lambda t: (-t[1].value_inr, t[0]))
+    total = sum((h.value_inr for _, h, _ in merged if h.value_inr is not None), ZERO)
+    ordered = sorted(merged, key=_order)
     rows = [
         Row(
             key=k,
@@ -191,8 +264,10 @@ def consolidate(holdings: Sequence[Holding], scope_ref: str | None = None) -> Co
             avg_cost=h.avg_cost,
             price=h.price,
             price_basis=h.price_basis,
+            currency=h.currency,
+            value_native=_native(h),
             value_inr=h.value_inr,
-            weight=h.value_inr / total if total else ZERO,
+            weight=None if h.value_inr is None else (h.value_inr / total if total else ZERO),
             as_of=h.as_of,
             source=h.source,
             sources=srcs,
@@ -200,14 +275,20 @@ def consolidate(holdings: Sequence[Holding], scope_ref: str | None = None) -> Co
         )  # fmt: skip
         for k, h, srcs in ordered
     ]
-    costed = [r for r in rows if r.avg_cost is not None]
-    invested = sum((r.quantity * (r.avg_cost or ZERO) for r in costed), ZERO)
-    costed_value = sum((r.value_inr for r in costed), ZERO)
+    rate = fx.rate if fx is not None else None
+
+    def cost_inr(r: Row) -> Decimal:
+        per_unit = r.quantity * (r.avg_cost or ZERO)
+        return per_unit if r.currency == "INR" else per_unit * (rate or ZERO)
+
+    costed = [r for r in rows if r.avg_cost is not None and r.value_inr is not None]
+    invested = sum((cost_inr(r) for r in costed), ZERO)
+    costed_value = sum((r.value_inr or ZERO for r in costed), ZERO)
     coverage = [
         SourceCoverage(
             source=s,
             holdings=sum(1 for r in rows if r.source == s),
-            value_inr=(v := sum((r.value_inr for r in rows if r.source == s), ZERO)),
+            value_inr=(v := sum((r.value_inr or ZERO for r in rows if r.source == s), ZERO)),
             share=v / total if total else ZERO,
         )
         for s in PRECEDENCE
@@ -226,6 +307,16 @@ def consolidate(holdings: Sequence[Holding], scope_ref: str | None = None) -> Co
             "InvestRight and depository CAS rows are matched by ISIN across all demats; "
             "set investright.demat_ref to scope the overlap to one demat"
         )
+    foreign = [r for r in rows if r.currency != "INR"]
+    missing = [r for r in foreign if r.value_inr is None]
+    if missing:
+        why = fx.reason if fx is not None and fx.reason else "no USDINR rate was supplied"
+        notes.append(f"{len(missing)} USD holding(s) excluded from INR totals and weights: {why}")
+    if any(r.avg_cost is not None and r.value_inr is not None for r in foreign):
+        notes.append(
+            "USD cost is converted at the valuation-date rate, so INR P&L on USD holdings "
+            "excludes FX gain on cost"
+        )
     return Consolidated(
         rows=rows,
         total_value=total,
@@ -236,4 +327,6 @@ def consolidate(holdings: Sequence[Holding], scope_ref: str | None = None) -> Co
         reconciliation=reconcile(holdings, scope_ref),
         notes=notes,
         as_of=max((h.as_of for h in holdings), default=None),
+        fx=fx if foreign else None,
+        exposure=_exposure(rows, total),
     )

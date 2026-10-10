@@ -123,3 +123,15 @@ def test_http_error_status_is_source_unavailable() -> None:
 def test_default_client_replay_raises_fixture_missing() -> None:
     with pytest.raises(FixtureMissing):
         MasterSources().fetch(resource="nse")
+
+
+def test_parse_sec_maps_arca_spellings() -> None:
+    import json
+
+    doc = {
+        "fields": ["cik", "name", "ticker", "exchange"],
+        "data": [[1, "Fund A", "SPYA", "NYSE Arca"], [2, "Fund B", "QQQB", "NYSEARCA"],
+                 [3, "Odd Co", "ODD", "Weird"]],
+    }  # fmt: skip
+    rows = {r.symbol: r.exchange for r in parse_sec(json.dumps(doc))}
+    assert rows == {"SPYA": "ARCA", "QQQB": "ARCA", "ODD": "US"}

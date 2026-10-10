@@ -8,12 +8,13 @@ from datetime import date
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 PriceBasis = Literal["previous_close", "ltp", "nav", "statement", "avg_cost"]
-Source = Literal["investright", "cas_demat", "cas_rta", "csv"]
-# Highest precedence first (ST-2.8).
-PRECEDENCE: tuple[Source, ...] = ("investright", "cas_demat", "cas_rta", "csv")
+Source = Literal["investright", "cas_demat", "cas_rta", "alpaca", "us_csv", "csv"]
+# Highest precedence first (ST-2.8). A broker-pulled US row with a market price outranks a
+# book-value US CSV row.
+PRECEDENCE: tuple[Source, ...] = ("investright", "cas_demat", "cas_rta", "alpaca", "us_csv", "csv")
 
 
 class Holding(BaseModel):
@@ -28,7 +29,7 @@ class Holding(BaseModel):
     avg_cost: Decimal | None = None
     price: Decimal
     price_basis: PriceBasis
-    value_inr: Decimal
+    value_inr: Decimal | None
     as_of: date
     source: Source
     source_label: str
@@ -36,6 +37,34 @@ class Holding(BaseModel):
     plan: str | None = None
     amfi_code: str | None = None
     unresolved: bool = False
+    currency: str = "INR"
+
+    @model_validator(mode="after")
+    def _inr_rows_carry_value(self) -> "Holding":
+        if self.currency == "INR" and self.value_inr is None:
+            raise ValueError("value_inr is required for an INR holding")
+        return self
+
+    @property
+    def value_native(self) -> Decimal:
+        """Quantity x price in the holding's own currency."""
+        return self.quantity * self.price
+
+
+class Lot(BaseModel):
+    """A dated purchase lot (US CSV): the basis of holding period and XIRR (ST-3.4)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str
+    exchange: str
+    currency: str
+    holder_ref: str = ""
+    acquired_on: date
+    quantity: Decimal
+    cost_per_unit: Decimal
+    source: Source
+    source_label: str
 
 
 class Txn(BaseModel):
@@ -64,6 +93,7 @@ class IngestReport(BaseModel):
     as_of: date
     holdings: int = 0
     transactions: int = 0
+    lots: int = 0
     holder_refs: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     skipped: bool = False

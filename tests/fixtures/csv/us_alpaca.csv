@@ -1,0 +1,4 @@
+symbol,exchange,qty,avg_entry_price,current_price
+AAPL,NASDAQ,10,150.25,190.00
+
+SPYX,ARCA,4,92.10,95.00

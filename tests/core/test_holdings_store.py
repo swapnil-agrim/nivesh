@@ -9,8 +9,9 @@ from nivesh_core import holdings_store as hs
 from nivesh_core.db import init_stores
 from nivesh_core.db.sqlite import open_sqlite
 from nivesh_core.errors import NiveshError
-from nivesh_core.holdings import Holding
+from nivesh_core.holdings import PRECEDENCE, Holding, Lot
 from tests.holdings_fx import ISIN_A, ISIN_B, D, holding, txn
+from tests.us_fx import lot, usd_holding
 
 NOW = datetime(2026, 1, 5, 12, tzinfo=UTC)
 
@@ -192,3 +193,95 @@ def test_last_sync_date_and_csv_accounts(conn: sqlite3.Connection) -> None:
     csv = holding(source="csv", source_label="Other broker", holder_ref="", price_basis="avg_cost")
     save(conn, [csv], kind="csv", digest="x")
     assert {h.source_label for h in hs.latest_holdings(conn)} == {"InvestRight", "Other broker"}
+
+
+# ---- E3: currency, nullable INR value, lots ----------------------------------------------------
+def test_holding_defaults_to_inr_and_requires_value_inr() -> None:
+    assert holding().currency == "INR"
+    with pytest.raises(ValueError, match="value_inr"):
+        Holding.model_validate({**holding().model_dump(), "value_inr": None})
+
+
+def test_non_inr_holding_may_have_no_value_inr() -> None:
+    assert usd_holding().value_inr is None
+
+
+def test_value_native_is_quantity_times_price() -> None:
+    assert usd_holding(quantity=D(3), price=D("2.5")).value_native == D("7.5")
+
+
+def test_precedence_places_alpaca_and_us_csv_between_cas_rta_and_csv() -> None:
+    assert PRECEDENCE == ("investright", "cas_demat", "cas_rta", "alpaca", "us_csv", "csv")
+
+
+def test_lot_is_frozen_and_validates() -> None:
+    lt = lot()
+    with pytest.raises(ValueError):
+        lt.quantity = D(1)  # type: ignore[misc]
+    with pytest.raises(ValueError):
+        Lot.model_validate({**lt.model_dump(), "acquired_on": "not-a-date"})
+
+
+def test_save_ingest_round_trips_usd_holding_with_null_value_inr(conn: sqlite3.Connection) -> None:
+    save(conn, [usd_holding()], kind="us_csv")
+    (h,) = hs.latest_holdings(conn)
+    assert h.currency == "USD" and h.value_inr is None and h.price == D(100)
+
+
+def test_save_ingest_nulls_value_inr_for_non_inr_even_if_set(conn: sqlite3.Connection) -> None:
+    save(conn, [usd_holding(value_inr=D(999))], kind="us_csv")
+    assert conn.execute("SELECT value_inr FROM holding_snapshot").fetchone() == (None,)
+
+
+def test_upsert_security_usd_sets_market_us_and_currency_usd(conn: sqlite3.Connection) -> None:
+    save(conn, [usd_holding()], kind="us_csv")
+    row = conn.execute("SELECT currency, market, exchange FROM security").fetchone()
+    assert row == ("USD", "US", "NASDAQ")
+
+
+def test_inr_upsert_unchanged_market_in_currency_inr(conn: sqlite3.Connection) -> None:
+    save(conn, [holding()])
+    assert conn.execute("SELECT currency, market FROM security").fetchone() == ("INR", "IN")
+
+
+def test_save_ingest_stores_lots_and_latest_lots_follow_latest_ingest_rule(
+    conn: sqlite3.Connection,
+) -> None:
+    save(conn, [usd_holding()], kind="us_csv", lots=[lot(), lot(quantity=D(6))])
+    assert [x.quantity for x in hs.latest_lots(conn)] == [D(4), D(6)]
+    save(conn, [usd_holding()], kind="us_csv", lots=[lot(quantity=D(10))], as_of=date(2026, 1, 6))
+    assert [x.quantity for x in hs.latest_lots(conn)] == [D(10)]
+
+
+def test_reimport_edited_file_replaces_lots_not_doubles_them(conn: sqlite3.Connection) -> None:
+    for q in (D(4), D(5)):
+        save(conn, [usd_holding()], kind="us_csv", lots=[lot(quantity=q)])
+    (only,) = hs.latest_lots(conn)
+    assert only.quantity == D(5) and only.source == "us_csv"
+
+
+def test_same_label_india_and_us_csv_do_not_supersede_each_other(conn: sqlite3.Connection) -> None:
+    save(conn, [holding(source="csv", source_label="Broker")], kind="csv")
+    save(conn, [usd_holding(source_label="Broker")], kind="us_csv")
+    assert {h.currency for h in hs.latest_holdings(conn)} == {"INR", "USD"}
+    kinds = {r[0] for r in conn.execute("SELECT kind FROM account")}
+    assert kinds == {"manual", "manual_us"}
+
+
+def test_us_csv_ingest_creates_no_manual_account(conn: sqlite3.Connection) -> None:
+    save(conn, [usd_holding()], kind="us_csv")
+    assert {r[0] for r in conn.execute("SELECT kind FROM account")} == {"manual_us"}
+
+
+def test_save_ingest_rolls_back_lots_with_holdings(conn: sqlite3.Connection) -> None:
+    with pytest.raises(NiveshError):
+        save(conn, [usd_holding()], kind="us_csv", lots=[lot(symbol="ZZZ")])
+    assert count(conn, "lot") == count(conn, "holding_snapshot") == count(conn, "ingest") == 0
+
+
+def test_ingest_report_counts_lots(conn: sqlite3.Connection) -> None:
+    rep = hs.save_ingest(
+        conn, kind="us_csv", source_label="x", digest=None, as_of=date(2026, 1, 5),
+        holdings=[usd_holding()], txns=[], holder_refs=[], warnings=[], lots=[lot()],
+    )  # fmt: skip
+    assert rep.lots == 1 and hs.get_report(conn, rep.ingest_id or 0).lots == 1

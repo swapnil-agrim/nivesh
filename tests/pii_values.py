@@ -108,3 +108,19 @@ def fmp_key() -> str:
 
 def cik_synthetic() -> str:
     return "0" + "0012" + "3456" + "7"  # zero-led 10-digit CIK shape; not a phone pattern
+
+
+def alpaca_key_value() -> str:
+    return "test-" + "alpaca-" + "kid"
+
+
+def alpaca_secret_value() -> str:
+    return "test-" + "alpaca-" + "sec"
+
+
+def alpaca_key_header() -> str:
+    return "APCA-API-" + "KEY-ID"
+
+
+def alpaca_secret_header() -> str:
+    return "APCA-API-" + "SECRET-KEY"

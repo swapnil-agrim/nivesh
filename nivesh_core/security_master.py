@@ -139,6 +139,7 @@ def _merge(conn: sqlite3.Connection, p: int, r: int, s: BuildSummary, ts: str) -
         s.rows_dropped += 1
     conn.execute("DELETE FROM txn WHERE security_id = ?", (p,))
     conn.execute("UPDATE holding_snapshot SET security_id = ? WHERE security_id = ?", (r, p))
+    conn.execute("UPDATE lot SET security_id = ? WHERE security_id = ?", (r, p))
     conn.execute(
         "UPDATE OR IGNORE security_alias SET security_id = ? WHERE security_id = ?", (r, p)
     )

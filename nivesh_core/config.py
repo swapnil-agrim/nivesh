@@ -149,6 +149,37 @@ class MarketSettings(BaseModel):
         return v
 
 
+class UsBrokerSettings(BaseModel):
+    """Read-only US broker connector (Alpaca positions/account). The base URL is per spec,
+    unverified against the live API; credentials are references, never values."""
+
+    model_config = ConfigDict(extra="forbid")
+    base_url: str = "https://paper-api.alpaca.markets"
+    alpaca_key: str = "ref:ALPACA_KEY"
+    alpaca_secret: str = "ref:ALPACA_SECRET"  # noqa: S105 - a reference, not a value
+
+    @field_validator("base_url")
+    @classmethod
+    def _https(cls, v: str) -> str:
+        if not v.startswith("https://"):
+            raise ValueError("must start with https://")
+        return v.rstrip("/")
+
+    @field_validator("alpaca_key", "alpaca_secret")
+    @classmethod
+    def _ref(cls, v: str) -> str:
+        if not REF_RE.match(v):
+            raise ValueError("must be a reference such as 'ref:NAME'")
+        return v
+
+
+class TaxSettings(BaseModel):
+    """Owner-set parameters. Nivesh only compares days against them; it gives no tax advice."""
+
+    model_config = ConfigDict(extra="forbid")
+    us_long_term_days: int | None = Field(default=None, gt=0)
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["dev", "prod"] = "dev"
@@ -162,6 +193,8 @@ class Settings(BaseModel):
     backup: BackupSettings = BackupSettings()
     investright: InvestRightSettings = InvestRightSettings()
     market: MarketSettings = MarketSettings()
+    tax: TaxSettings = TaxSettings()
+    us_broker: UsBrokerSettings = UsBrokerSettings()
 
     @field_validator("registered_ip")
     @classmethod
