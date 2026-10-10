@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from nivesh_core.agents_config import AgentsSettings
 from nivesh_core.analysis_config import AnalysisSettings
 from nivesh_core.errors import ConfigError
+from nivesh_core.review_config import ReviewSettings
 from nivesh_core.secrets import REF_RE
 from nivesh_core.yamlio import read_mapping, validate
 
@@ -175,11 +176,22 @@ class UsBrokerSettings(BaseModel):
         return v
 
 
+class IndiaTax(BaseModel):
+    """Owner-set India equity/ETF tax inputs; unset means gain and days only. No tax advice."""
+
+    model_config = ConfigDict(extra="forbid")
+    long_term_days: int | None = Field(default=None, gt=0)
+    short_rate_pct: Decimal | None = Field(default=None, ge=0, le=100)
+    long_rate_pct: Decimal | None = Field(default=None, ge=0, le=100)
+    ltcg_exemption_inr: Decimal | None = Field(default=None, ge=0)
+
+
 class TaxSettings(BaseModel):
     """Owner-set parameters. Nivesh only compares days against them; it gives no tax advice."""
 
     model_config = ConfigDict(extra="forbid")
     us_long_term_days: int | None = Field(default=None, gt=0)
+    india: IndiaTax = IndiaTax()
 
 
 class MfSources(BaseModel):
@@ -298,6 +310,7 @@ class Settings(BaseModel):
     mf: MfSettings = MfSettings()
     analysis: AnalysisSettings = AnalysisSettings()
     agents: AgentsSettings = AgentsSettings()
+    review: ReviewSettings = ReviewSettings()
 
     @field_validator("registered_ip")
     @classmethod

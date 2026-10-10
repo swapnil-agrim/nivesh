@@ -8,7 +8,8 @@ from nivesh_core.pii_scan import scan_text
 
 AGENTS = [
     "fundamental", "technical", "news", "macro", "mf", "bull", "bear", "lens_value",
-    "lens_growth", "lens_contrarian", "lens_valuation", "risk", "pm",
+    "lens_growth", "lens_contrarian", "lens_valuation", "risk", "pm", "thesis_draft",
+    "holding_review",
 ]  # fmt: skip
 WRITE_VERBS = re.compile(
     r"\b(place[sd]?|orders?|ordered|modif(y|ied)|cancel|transfer(red|s)?|withdraw|delete[sd]?)\b"
@@ -117,3 +118,19 @@ def test_prompts_have_no_lowercase_write_verbs() -> None:
 def test_prompts_have_no_credential_looking_literals() -> None:
     for p in PROMPT_DIR.glob("*/v*.md"):
         assert scan_text(p.read_text()) == [], p
+
+
+def test_holding_review_prompt_says_code_decides_triggers_and_actions_can_only_be_lowered() -> None:
+    t = load_prompt("holding_review").text
+    for needle in ("met, not_met or unknown", "evidence", "Code computes", "only lower",
+                   "HOLD, ADD, TRIM, EXIT or REVIEW", "override_reason", "triggers"):  # fmt: skip
+        assert needle in t, needle
+
+
+def test_thesis_draft_prompt_requires_two_to_four_measurable_criteria_and_60_words() -> None:
+    t = load_prompt("thesis_draft").text
+    for needle in ("60 words", "2 to 4", "metric", "comparator", "threshold", "point_index",
+                   "no tools"):  # fmt: skip
+        assert needle in t, needle
+    assert not re.search(r"(?i)\borders?\b", t)
+    assert not re.search(r"(?i)\borders?\b", load_prompt("holding_review").text)

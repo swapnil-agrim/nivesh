@@ -29,6 +29,10 @@ us_broker:
 # informational long-term flag on US lots (days held >= this value). Unset means no flag.
 tax:
   us_long_term_days: 365
+  # E8 India equity/ETF lots (owner-set; unset means gain and days only, no tax figure):
+  # india: {long_term_days: ..., short_rate_pct: ..., long_rate_pct: ..., ltcg_exemption_inr: ...}
+  # long_term_days is compared with >= (days held >= value): India's "more than 12 months"
+  # means 366 for strictly more than 365.
 
 # E4 market data. Secrets are refs; the EDGAR contact is read only from the secret EDGAR_CONTACT.
 # Series ids, feed urls and wire formats are per spec, unverified against live sources.
@@ -175,7 +179,8 @@ analysis:
 # ids. tiers map each agent to top/mid/small (PID 14.1). prompt_pins pins a prompt version.
 agents:
   models: {top: opus, mid: sonnet, small: haiku}
-  tiers: {fundamental: top, technical: mid, news: mid, macro: mid, mf: mid, bull: top, bear: top, lens: mid, risk: top, pm: top}
+  tiers: {fundamental: top, technical: mid, news: mid, macro: mid, mf: mid, bull: top, bear: top, lens: mid, risk: top, pm: top,
+          thesis_draft: top, holding_review: top}
   concurrency: 4               # live agents across the whole run, 1..16
   debate_rounds: 2             # deep mode, 1..3
   lenses_enabled: true
@@ -187,3 +192,16 @@ agents:
   starter_weight_pct: 2        # weight tested against the profile limits for the risk veto
   # max_days_to_trade: 5       # unset: liquidity does not veto
   max_filing_sections: 2       # filing-text reads per fundamental run
+
+# E8 portfolio review: owner-set parameters, example only and equal to the built-in defaults
+# (nothing here is advice). Section 15.6 trigger thresholds, thesis review interval, rebalance band
+# (percentage points per asset class) and the per-proposal turnover cap.
+review:
+  default_review_days: 90
+  band_pp: 5
+  turnover_limit_pct: 30        # per proposal; annual turnover is not tracked yet
+  valuation_percentile_min: 95
+  valuation_metric: pe
+  valuation_history_years: 5
+  below_sma200_sessions: 60
+  deterioration_quarters: 2

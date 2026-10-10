@@ -26,7 +26,8 @@ D13 = {
     | m("market", "get_index"),
     "mf": m("engine", "mf_analyse", "mf_overlap", "get_fund_meta"),
     "risk": m("engine", "risk_metrics", "portfolio_xray", "red_flags"),
-    "bull": set(), "bear": set(), "pm": set(),
+    "holding_review": m("engine", "fa_compute", "ta_compute", "valuation_range", "red_flags"),
+    "bull": set(), "bear": set(), "pm": set(), "thesis_draft": set(),
     "lens_value": set(), "lens_growth": set(), "lens_contrarian": set(), "lens_valuation": set(),
 }  # fmt: skip
 
@@ -85,6 +86,14 @@ def test_spec_tiers_equal_the_pid_roster() -> None:
     assert tiers["fundamental"] == "top" and tiers["risk"] == "top" and tiers["pm"] == "top"
     assert tiers["bull"] == tiers["bear"] == "top"
     assert {tiers[n] for n in ("technical", "news", "macro", "mf", "lens_value")} == {"mid"}
+    assert tiers["thesis_draft"] == tiers["holding_review"] == "top"
+
+
+def test_thesis_draft_has_no_tools_and_no_servers() -> None:
+    spec = SPECS["thesis_draft"]
+    assert spec.tools == () and spec.servers == () and spec.max_turns == 1
+    assert spec.schema == "ThesisDraft" and SPECS["holding_review"].schema == "HoldingReview"
+    assert SPECS["holding_review"].servers == ("engine",)
 
 
 def test_every_spec_has_a_prompt_whose_front_matter_agrees() -> None:

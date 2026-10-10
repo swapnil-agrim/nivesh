@@ -93,11 +93,36 @@ def risk(**over: Any) -> dict[str, Any]:
     return d
 
 
+def crit_check(**over: Any) -> dict[str, Any]:
+    d: dict[str, Any] = {"criterion_id": 1, "status": "not_met", "evidence": [ev(1)]}
+    d.update(over)
+    return d
+
+
 def review(**over: Any) -> dict[str, Any]:
     d: dict[str, Any] = {
-        "schema_version": 1, "security_id": 1, "as_of": "2026-01-02", "action": "keep",
-        "thesis_status": "intact", "kill_criteria_hit": [], "valuation_stretch": False,
-        "tax_note": "", "evidence": [ev(1)],
+        "schema_version": 2, "security_id": 1, "as_of": "2026-01-02", "action": "HOLD",
+        "confidence": "medium", "reasons": [{"code": "thesis_intact", "text": "Returns hold up"}],
+        "criteria": [crit_check()], "thesis_status": "intact", "valuation_stretch": False,
+        "override_reason": "", "evidence": [ev(1)],
+    }  # fmt: skip
+    d.update(over)
+    return d
+
+
+def kill(n: int = 1, machine: bool = True) -> dict[str, Any]:
+    d: dict[str, Any] = {"criterion_id": n, "text": f"Synthetic criterion {n} breaks"}
+    if machine:
+        d.update(metric="roce_pct", comparator="lt", threshold="12.5", unit="%")
+    return d
+
+
+def thesis_draft(**over: Any) -> dict[str, Any]:
+    d: dict[str, Any] = {
+        "schema_version": 1, "security_id": 1, "as_of": "2026-01-02",
+        "horizon": "long_term_1y_plus", "why": "Durable franchise with steady returns.",
+        "kill_criteria": [kill(1), kill(2, machine=False)],
+        "evidence": [{"view": "fundamental", "point_index": 0}], "data_gaps": [],
     }  # fmt: skip
     d.update(over)
     return d

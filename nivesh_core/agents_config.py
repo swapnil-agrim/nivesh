@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 AGENTS: tuple[str, ...] = (
     "fundamental", "technical", "news", "macro", "mf", "bull", "bear", "lens", "risk", "pm",
+    "thesis_draft", "holding_review",
 )  # fmt: skip
 Tier = Literal["top", "mid", "small"]
 LensName = Literal["value", "growth", "contrarian", "valuation"]
@@ -34,6 +35,7 @@ def _default_tiers() -> dict[str, Tier]:
     return {
         "fundamental": "top", "technical": "mid", "news": "mid", "macro": "mid", "mf": "mid",
         "bull": "top", "bear": "top", "lens": "mid", "risk": "top", "pm": "top",
+        "thesis_draft": "top", "holding_review": "top",
     }  # fmt: skip
 
 

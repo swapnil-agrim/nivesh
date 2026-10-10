@@ -11,7 +11,7 @@ from tests.agents import committee_fx as fx
 
 NAMES = [
     "AnalystView", "MacroView", "FundView", "DebateTurn", "LensView", "RiskAssessment",
-    "HoldingReview", "Verdict",
+    "HoldingReview", "Verdict", "ThesisDraft",
 ]  # fmt: skip
 
 
@@ -145,3 +145,96 @@ def test_schema_objects_never_use_a_field_named_with_a_redaction_trigger_except_
         walk(schemas.schema_json(n))
     assert "key_points" in seen
     assert [s for s in seen if is_sensitive_key(s) and s not in allowed] == []
+
+
+def test_holding_review_v2_valid_payload_and_upper_case_actions() -> None:
+    r = check("HoldingReview", fx.review())
+    assert r.schema_version == 2 and r.action == "HOLD" and r.confidence == "medium"
+    assert r.triggers == [] and r.tax_note == "" and r.overrides == []  # code fills these
+    for action in ("HOLD", "ADD", "TRIM", "EXIT", "REVIEW"):
+        check("HoldingReview", fx.review(action=action))
+    full = fx.review(
+        triggers=[{"code": "concentration", "status": "triggered", "detail": "position 12%"}],
+        tax_note="t", overrides=["o"], override_reason="one-off", valuation_stretch=None,
+    )  # fmt: skip
+    assert check("HoldingReview", full).triggers[0].status == "triggered"
+
+
+def test_holding_review_rejects_keep_and_schema_version_1() -> None:
+    for bad in ({"action": "keep"}, {"action": "hold"}, {"schema_version": 1},
+                {"confidence": "sure"}):  # fmt: skip
+        with pytest.raises(ValidationError):
+            check("HoldingReview", fx.review(**bad))
+    with pytest.raises(ValidationError):
+        check("HoldingReview", fx.review(triggers=[{"code": "astrology", "status": "clear"}]))
+
+
+def test_trigger_codes_equal_the_engine_rule_codes() -> None:
+    from typing import get_args
+
+    from nivesh_engine.review_rules import CODES
+
+    assert get_args(schemas.TriggerCode) == CODES
+
+
+def test_met_or_not_met_criterion_needs_evidence_unknown_does_not() -> None:
+    for status in ("met", "not_met"):
+        with pytest.raises(ValidationError, match="evidence"):
+            check("HoldingReview", fx.review(criteria=[fx.crit_check(status=status, evidence=[])]))
+        check("HoldingReview", fx.review(criteria=[fx.crit_check(status=status)]))
+        code = fx.crit_check(status=status, evidence=[], judged_by="code")
+        check("HoldingReview", fx.review(criteria=[code]))  # code-judged needs no agent evidence
+    check("HoldingReview", fx.review(criteria=[fx.crit_check(status="unknown", evidence=[])]))
+
+
+def test_holding_review_needs_at_least_one_reason() -> None:
+    with pytest.raises(ValidationError):
+        check("HoldingReview", fx.review(reasons=[]))
+    with pytest.raises(ValidationError):
+        check("HoldingReview", fx.review(reasons=[{"code": "", "text": "x"}]))
+
+
+def test_thesis_draft_valid_and_rejects_bad_counts_long_why_and_missing_machine_criterion() -> None:
+    d = check("ThesisDraft", fx.thesis_draft())
+    assert d.horizon == "long_term_1y_plus" and len(d.kill_criteria) == 2
+    assert str(d.kill_criteria[0].threshold) == "12.5"
+    text_only = {"criterion_id": 3, "text": "Management credibility is lost"}
+    for bad in (
+        {"kill_criteria": [fx.kill(1)]},
+        {"kill_criteria": [fx.kill(i) for i in range(1, 6)]},
+        {"why": " ".join(["w"] * 61)},
+        {"kill_criteria": [text_only, {**text_only, "criterion_id": 4}]},
+        {"evidence": []},
+        {"horizon": "forever"},
+        {"evidence": [{"tool_call_id": "x"}]},
+    ):
+        with pytest.raises(ValidationError):
+            check("ThesisDraft", fx.thesis_draft(**bad))
+
+
+def test_thesis_draft_reuses_the_core_kill_criterion_definition() -> None:
+    from nivesh_core.thesis import KillCriterion
+
+    assert schemas.ThesisDraft.model_fields["kill_criteria"].annotation == list[KillCriterion]
+    assert schemas.KillCriterion is KillCriterion
+
+
+def test_new_schema_fields_avoid_redaction_parts_and_write_words() -> None:
+    from nivesh_mcp.base import is_write_name
+
+    seen: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "properties" and isinstance(v, dict):
+                    seen.update(v)
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    for n in ("HoldingReview", "ThesisDraft"):
+        walk(schemas.schema_json(n))
+    assert {"criteria", "override_reason", "kill_criteria", "judged_by"} <= seen
+    assert [s for s in seen if is_sensitive_key(s) or is_write_name(s)] == []

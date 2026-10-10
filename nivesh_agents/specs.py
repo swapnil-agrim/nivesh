@@ -1,6 +1,7 @@
 """Agent registry (PID 14.1). Each spec names its schema, its exact read-only tool allow-list
-(plan D-13) and a default turn cap. Agents without tools (debate, lenses, portfolio manager)
-get no servers at all; holdings-derived engine tools belong to the risk manager only.
+(plan D-13) and a default turn cap. Agents without tools (debate, lenses, portfolio manager,
+thesis drafting) get no servers at all; holdings-derived engine tools belong to the risk
+manager only.
 """
 
 from dataclasses import dataclass
@@ -54,5 +55,13 @@ SPECS: dict[str, AgentSpec] = {
             8,
         ),
         AgentSpec("pm", "pm", "Verdict", (), 1),
+        AgentSpec("thesis_draft", "thesis_draft", "ThesisDraft", (), 1),
+        AgentSpec(
+            "holding_review",
+            "holding_review",
+            "HoldingReview",
+            _mcp("engine", "fa_compute", "ta_compute", "valuation_range", "red_flags"),
+            8,
+        ),
     )
 }

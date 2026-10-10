@@ -5,6 +5,6 @@ target_allocation: {equity: 60, debt: 30, gold: 10}
 max_position_pct: 10
 max_sector_pct: 30
 exclusions: []
-tax_rates: {stcg: 20, ltcg: 12.5}
+tax_rates: {stcg: 20, ltcg: 12.5}   # legacy, not read by any code; set tax.india in nivesh.yaml
 base_currency: INR
 monthly_cost_cap: 2000

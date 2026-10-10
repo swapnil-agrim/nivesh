@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal, localcontext
+from functools import cache
 
 from nivesh_core.analysis_config import AnalysisSettings, TaSettings
 from nivesh_core.market_models import ShareholdingRow
@@ -445,3 +446,36 @@ def inputs_needed(names: Iterable[str]) -> frozenset[str]:
 
 def evaluate(name: str, bundles: Bundles) -> Cell:
     return REGISTRY[name].extract(bundles)
+
+
+def value_of(m: Metric | Cell) -> Decimal | None:
+    """The Decimal value of an available metric or cell, else None."""
+    v = m.value
+    ok = m.available if isinstance(m, Metric) else True
+    return v if ok and isinstance(v, Decimal) else None
+
+
+def metric_values(b: Bundles) -> dict[str, Decimal | None]:
+    """Every numeric engine figure for one security by name (FA, TA, valuation multiples and
+    their own-history percentiles, and the screener metrics); None when unavailable."""
+    out: dict[str, Decimal | None] = {}
+    for name, m in (*b.fa().metrics.items(), *b.ta().values.items()):
+        out[name] = value_of(m)
+    v = b.valuation()
+    for name, mr in v.multiples.items() if v is not None else ():
+        out[name] = value_of(mr.current)
+        for window, m in mr.percentiles.items():
+            out[f"{name}_percentile_{window}"] = value_of(m)
+    for name, d in REGISTRY.items():
+        if d.kind == "numeric" and d.bundle != "universe":
+            out[name] = value_of(evaluate(name, b))
+    return dict(sorted(out.items()))
+
+
+@cache
+def known_metrics() -> frozenset[str]:
+    """The names `metric_values` produces under the default analysis settings: the only valid
+    `metric` of a kill criterion. Computed once from empty inputs, so it cannot drift."""
+    day = date(2000, 1, 1)
+    inp = SecurityInputs(0, "", valuation=ValuationInputs("IN", "general", day, (), (), None))
+    return frozenset(metric_values(Bundles(inp, day, AnalysisSettings())))
