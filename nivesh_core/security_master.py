@@ -10,7 +10,7 @@ ranked candidates for such an ISIN.
 import json
 import re
 import sqlite3
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -305,6 +305,16 @@ class SecurityRow:
 
 
 @dataclass(frozen=True)
+class Peers:
+    """Comparable securities for one security: `basis` is "industry" or "override"; `reason` says
+    why the list is empty or incomplete."""
+
+    rows: list[SecurityRow]
+    basis: str
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
 class Candidate:
     security_id: int
     symbol: str
@@ -384,6 +394,63 @@ class SecurityMaster:
 
     def cik_of(self, security_id: int) -> str | None:
         return self.alias_of(security_id, "cik")
+
+    def get_many(self, security_ids: Iterable[int]) -> dict[int, SecurityRow]:
+        """Rows by id for the ids that exist (unresolved placeholders excluded)."""
+        ids = sorted(set(security_ids))
+        out: dict[int, SecurityRow] = {}
+        for i in range(0, len(ids), 500):
+            chunk = ids[i : i + 500]
+            marks = ", ".join("?" * len(chunk))
+            for r in self._rows(f"id IN ({marks})", chunk, None):
+                out[r.id] = r
+        return out
+
+    def peers(
+        self,
+        security_id: int,
+        overrides: Mapping[str, Sequence[str]] | None = None,
+        *,
+        limit: int | None = None,
+    ) -> Peers:
+        """Other listed securities in the same industry and market (mutual funds and indices
+        excluded), sorted by symbol. An owner override (symbol -> peer symbols, matched case
+        insensitively) replaces the industry selection."""
+        sec = self.get(security_id)
+        if sec is None:
+            return Peers([], "industry", "unknown security")
+        wanted = next(
+            (v for k, v in (overrides or {}).items() if k.upper() == sec.symbol.upper()), None
+        )
+        if wanted is not None:
+            return self._override_peers(sec, wanted, limit)
+        if not sec.industry:
+            return Peers([], "industry", "no industry recorded for this security")
+        sql = (
+            f"SELECT {_SEC_COLS} FROM security WHERE industry = ? AND market = ? AND id != ? "  # noqa: S608
+            "AND unresolved = 0 AND COALESCE(asset_class, '') NOT IN ('mf', 'index') "
+            "ORDER BY symbol, id"
+        )
+        args: list[object] = [sec.industry, sec.market, sec.id]
+        if limit is not None:
+            sql += " LIMIT ?"
+            args.append(limit)
+        return Peers([SecurityRow(*r) for r in self.conn.execute(sql, args).fetchall()], "industry")
+
+    def _override_peers(self, sec: SecurityRow, wanted: Sequence[str], limit: int | None) -> Peers:
+        found: dict[int, SecurityRow] = {}
+        missing: list[str] = []
+        for symbol in wanted:
+            hits = [r for r in self.by_symbol(symbol, sec.market) if r.id != sec.id]
+            if hits:
+                found.setdefault(hits[0].id, hits[0])
+            elif symbol.upper() != sec.symbol.upper():
+                missing.append(symbol)
+        rows = sorted(found.values(), key=lambda r: (r.symbol, r.id))[:limit]
+        reason = (
+            f"override peers not found in the master: {', '.join(missing)}" if missing else None
+        )
+        return Peers(rows, "override", reason)
 
     def _via_alias(self, kind: str, value: str, market: str | None) -> list[SecurityRow]:
         return self._rows(

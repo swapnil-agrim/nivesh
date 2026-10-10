@@ -7,6 +7,7 @@ import typer
 
 from nivesh_agents.runtime import run_command, safe_error
 from nivesh_cli.common import settings_of, user_errors
+from nivesh_cli.engine import engine_app
 from nivesh_cli.holdings import holdings_app
 from nivesh_cli.market import market_app, master_app
 from nivesh_cli.mf import mf_app
@@ -29,6 +30,7 @@ app.add_typer(mcp_app, name="mcp")
 secrets_app = typer.Typer(no_args_is_help=True, help="Manage secrets in the OS keychain.")
 app.add_typer(secrets_app, name="secrets")
 app.registered_commands.extend(holdings_app.registered_commands)  # login, sync, ingest, ...
+app.registered_commands.extend(engine_app.registered_commands)  # ta, fa, valuation, ...
 app.add_typer(master_app, name="master")
 app.add_typer(market_app, name="market")
 app.add_typer(mf_app, name="mf")

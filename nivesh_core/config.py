@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from nivesh_core.analysis_config import AnalysisSettings
 from nivesh_core.errors import ConfigError
 from nivesh_core.secrets import REF_RE
 from nivesh_core.yamlio import read_mapping, validate
@@ -294,6 +295,7 @@ class Settings(BaseModel):
     tax: TaxSettings = TaxSettings()
     us_broker: UsBrokerSettings = UsBrokerSettings()
     mf: MfSettings = MfSettings()
+    analysis: AnalysisSettings = AnalysisSettings()
 
     @field_validator("registered_ip")
     @classmethod

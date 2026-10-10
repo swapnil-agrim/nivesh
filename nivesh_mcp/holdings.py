@@ -424,7 +424,8 @@ def _securities(rep: LotReport, busy: str | None, configured: bool) -> list[dict
         {
             "symbol": s.symbol, "exchange": s.exchange,
             "holding_quantity": _num(s.holding_quantity),
-            "lots_cover_quantity": s.lots_cover_quantity, "price": _num(s.price),
+            "lots_cover_quantity": s.lots_cover_quantity, "coverage": s.coverage,
+            "price": _num(s.price),
             "price_date": s.price_date.isoformat() if s.price_date else None,
             "xirr_usd": _num(s.xirr_usd),
             "reason_usd": busy if busy and s.reason_usd == NO_PRICE else s.reason_usd,

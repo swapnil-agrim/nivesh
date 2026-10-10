@@ -110,17 +110,14 @@ def get_peers(security: str, limit: int = 20) -> dict[str, Any]:
     exists only for some listings, so the list can be empty (the reason is then given)."""
     with common.market_ctx() as m:
         sec = _pick(m, security)
-        if not sec.industry:
-            reason = "no industry recorded for this security"
-            data = {**_head(sec), "industry": None, "peers": [], "reason": reason}
-            return env(data, None, SOURCE)
-        rows = m.sql.execute(
-            "SELECT id, symbol, exchange, name FROM security WHERE industry = ? AND market = ? "
-            "AND id != ? AND unresolved = 0 AND COALESCE(asset_class, '') NOT IN ('mf', 'index') "
-            "ORDER BY symbol LIMIT ?",
-            (sec.industry, sec.market, sec.id, max(1, min(limit, common.MAX_ROWS))),
-        ).fetchall()
-    peers = [{"security_id": r[0], "symbol": r[1], "exchange": r[2], "name": r[3]} for r in rows]
+        found = SecurityMaster(m.sql).peers(sec.id, limit=max(1, min(limit, common.MAX_ROWS)))
+    if found.reason:
+        data = {**_head(sec), "industry": None, "peers": [], "reason": found.reason}
+        return env(data, None, SOURCE)
+    peers = [
+        {"security_id": r.id, "symbol": r.symbol, "exchange": r.exchange, "name": r.name}
+        for r in found.rows
+    ]
     return env({**_head(sec), "industry": sec.industry, "peers": peers}, None, SOURCE)
 
 

@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 
+from nivesh_engine import dmath
+
 BENCHMARK_LABEL = "price index, not TRI"
 IDCW_REASON = "IDCW payouts distort NAV; use the growth option"
 DAYS_PER_YEAR = Decimal(365)
@@ -90,13 +92,7 @@ def _check(name: str, series: Series) -> list[tuple[date, Decimal]]:
 
 
 def _q(value: Decimal, quantum: Decimal = PCT) -> Decimal:
-    return value.quantize(quantum, rounding=ROUND_HALF_EVEN)
-
-
-def _median(values: list[Decimal]) -> Decimal:
-    s = sorted(values)
-    mid = len(s) // 2
-    return s[mid] if len(s) % 2 else (s[mid - 1] + s[mid]) / 2
+    return dmath.quantize(value, quantum)
 
 
 def _windows(dates: list[date], window_days: int) -> list[tuple[int, int]]:
@@ -108,15 +104,10 @@ def _windows(dates: list[date], window_days: int) -> list[tuple[int, int]]:
     return out
 
 
-def _cagr(start: Decimal, end: Decimal, elapsed: int) -> Decimal:
-    """Annualised fractional return over `elapsed` days."""
-    return ((end / start).ln() * DAYS_PER_YEAR / elapsed).exp() - ONE
-
-
 def _window_returns(
     dates: list[date], values: list[Decimal], pairs: list[tuple[int, int]]
 ) -> list[Decimal]:
-    return [_cagr(values[i], values[j], (dates[j] - dates[i]).days) for i, j in pairs]
+    return [dmath.cagr(values[i], values[j], (dates[j] - dates[i]).days) for i, j in pairs]
 
 
 def _aligned(
@@ -155,10 +146,10 @@ def _window_stats(
             br = _window_returns(a_dates, a_bench, a_pairs)
             diffs = [f - b for f, b in zip(fr, br, strict=True)]
             beat = _q(HUNDRED * sum(1 for x in diffs if x > 0) / len(diffs), SHARE)
-            excess = _q(HUNDRED * _median(diffs))
+            excess = _q(HUNDRED * dmath.median(diffs))
             why_rel = None
     return WindowStats(
-        window_days, len(pairs), _q(HUNDRED * _median(rets)), _q(HUNDRED * min(rets)),
+        window_days, len(pairs), _q(HUNDRED * dmath.median(rets)), _q(HUNDRED * min(rets)),
         _q(HUNDRED * max(rets)), beat, excess, None, why_rel,
     )  # fmt: skip
 

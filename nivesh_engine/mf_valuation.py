@@ -15,6 +15,7 @@ from datetime import date
 from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 
 from nivesh_core.mf_models import FundHoldingRow
+from nivesh_engine import dmath
 from nivesh_engine.statements import StatementRow, latest_as_of
 
 ZERO, HUNDRED = Decimal(0), Decimal(100)
@@ -71,12 +72,6 @@ class HistoryCompare:
     reason: str | None = None
 
 
-def _median(values: list[Decimal]) -> Decimal:
-    s = sorted(values)
-    mid = len(s) // 2
-    return s[mid] if len(s) % 2 else (s[mid - 1] + s[mid]) / 2
-
-
 def history_compare(
     history: Mapping[date, Decimal | None],
     current: Decimal | None,
@@ -92,7 +87,7 @@ def history_compare(
     if len(values) < min_months:
         why = f"only {len(values)} usable month(s) of history (need {min_months})"
         return HistoryCompare(current, None, None, None, len(values), None, None, why)
-    med = _median(values)
+    med = dmath.median(values)
     stats = (med.quantize(MULT), min(values).quantize(MULT), max(values).quantize(MULT))
     if current is None or current <= 0:
         return HistoryCompare(

@@ -52,6 +52,17 @@ def adjust_closes(
     `splits=False` is for sources whose close is already split-adjusted (Yahoo, Stooq): only
     dividends are applied, so splits are never counted twice."""
     ordered = sorted(bars, key=lambda b: b.date)
+    factors = _cumulative(ordered, actions, dividends, splits)
+    return [
+        b.model_copy(update={"adj_close": (b.close * f).quantize(_Q, ROUND_HALF_EVEN)})
+        for b, f in zip(ordered, factors, strict=True)
+    ]
+
+
+def _cumulative(
+    ordered: Sequence[PriceBar], actions: Sequence[CorpAction], dividends: bool, splits: bool
+) -> list[Decimal]:
+    """The unrounded cumulative factor of each bar (bars sorted by date)."""
     todo = [
         a
         for a in _dedup(actions)
@@ -64,7 +75,41 @@ def adjust_closes(
         for ex, fac in factors:
             if ex > b.date:
                 f *= fac
-        out.append(b.model_copy(update={"adj_close": (b.close * f).quantize(_Q, ROUND_HALF_EVEN)}))
+        out.append(f)
+    return out
+
+
+def _per_source(
+    bars: Sequence[PriceBar], actions: Sequence[CorpAction]
+) -> list[tuple[list[PriceBar], bool]]:
+    """Bars grouped by source with whether that source needs its splits applied (exchange closes
+    are raw, Yahoo closes already are split-adjusted and are never counted twice)."""
+    return [
+        ([b for b in bars if b.source == source], source != "yahoo")
+        for source in sorted({b.source for b in bars})
+    ]
+
+
+def split_adjusted_map(
+    bars: Sequence[PriceBar], actions: Sequence[CorpAction]
+) -> dict[date, Decimal | None]:
+    """Date -> split-adjusted close (price basis: splits and bonuses, never dividends)."""
+    out: dict[date, Decimal | None] = {}
+    for mine, splits in _per_source(bars, actions):
+        for b in adjust_closes(mine, actions, dividends=False, splits=splits):
+            out[b.date] = b.adj_close
+    return out
+
+
+def split_factor_map(
+    bars: Sequence[PriceBar], actions: Sequence[CorpAction]
+) -> dict[date, Decimal]:
+    """Date -> the unrounded factor behind `split_adjusted_map` (adjusted = close x factor)."""
+    out: dict[date, Decimal] = {}
+    for mine, splits in _per_source(bars, actions):
+        ordered = sorted(mine, key=lambda b: b.date)
+        for b, f in zip(ordered, _cumulative(ordered, actions, False, splits), strict=True):
+            out[b.date] = f
     return out
 
 

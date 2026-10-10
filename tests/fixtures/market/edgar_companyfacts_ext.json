@@ -1,0 +1,170 @@
+{
+ "_note": "extension of edgar_companyfacts.json for the E6 vocabulary; hand-built, unverified against the live API; values scaled to <= 8 digits",
+ "entityName": "Example Corp",
+ "facts": {
+  "us-gaap": {
+   "GrossProfit": {
+    "units": {
+     "USD": [
+      {
+       "end": "2024-09-28",
+       "val": 180683,
+       "filed": "2024-11-01",
+       "form": "10-K",
+       "start": "2023-10-01"
+      }
+     ]
+    }
+   },
+   "DepreciationDepletionAndAmortization": {
+    "units": {
+     "USD": [
+      {
+       "end": "2024-09-28",
+       "val": 11445,
+       "filed": "2024-11-01",
+       "form": "10-K",
+       "start": "2023-10-01"
+      }
+     ]
+    }
+   },
+   "InterestExpense": {
+    "units": {
+     "USD": [
+      {
+       "end": "2024-09-28",
+       "val": 3933,
+       "filed": "2024-11-01",
+       "form": "10-K",
+       "start": "2023-10-01"
+      }
+     ]
+    }
+   },
+   "CashAndCashEquivalentsAtCarryingValue": {
+    "units": {
+     "USD": [
+      {
+       "end": "2024-09-28",
+       "val": 29943,
+       "filed": "2024-11-01",
+       "form": "10-K"
+      }
+     ]
+    }
+   },
+   "AssetsCurrent": {
+    "units": {
+     "USD": [
+      {
+       "end": "2024-09-28",
+       "val": 152987,
+       "filed": "2024-11-01",
+       "form": "10-K"
+      }
+     ]
+    }
+   },
+   "LiabilitiesCurrent": {
+    "units": {
+     "USD": [
+      {
+       "end": "2024-09-28",
+       "val": 176392,
+       "filed": "2024-11-01",
+       "form": "10-K"
+      }
+     ]
+    }
+   },
+   "AccountsReceivableNetCurrent": {
+    "units": {
+     "USD": [
+      {
+       "end": "2024-09-28",
+       "val": 33410,
+       "filed": "2024-11-01",
+       "form": "10-K"
+      }
+     ]
+    }
+   },
+   "AccountsPayableCurrent": {
+    "units": {
+     "USD": [
+      {
+       "end": "2024-09-28",
+       "val": 68960,
+       "filed": "2024-11-01",
+       "form": "10-K"
+      }
+     ]
+    }
+   },
+   "InventoryNet": {
+    "units": {
+     "USD": [
+      {
+       "end": "2024-09-28",
+       "val": 7286,
+       "filed": "2024-11-01",
+       "form": "10-K"
+      }
+     ]
+    }
+   },
+   "Assets": {
+    "units": {
+     "USD": [
+      {
+       "end": "2024-09-28",
+       "val": 364980,
+       "filed": "2024-11-01",
+       "form": "10-K"
+      }
+     ]
+    }
+   },
+   "IncomeTaxExpenseBenefit": {
+    "units": {
+     "USD": [
+      {
+       "end": "2024-09-28",
+       "val": 29749,
+       "filed": "2024-11-01",
+       "form": "10-K",
+       "start": "2023-10-01"
+      }
+     ]
+    }
+   },
+   "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest": {
+    "units": {
+     "USD": [
+      {
+       "end": "2024-09-28",
+       "val": 123485,
+       "filed": "2024-11-01",
+       "form": "10-K",
+       "start": "2023-10-01"
+      }
+     ]
+    }
+   },
+   "CommonStockDividendsPerShareDeclared": {
+    "units": {
+     "USD/shares": [
+      {
+       "end": "2024-09-28",
+       "val": 1,
+       "filed": "2024-11-01",
+       "form": "10-K",
+       "start": "2023-10-01"
+      }
+     ]
+    }
+   }
+  }
+ }
+}
