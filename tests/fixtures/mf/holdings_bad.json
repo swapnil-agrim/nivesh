@@ -1,0 +1,22 @@
+{
+ "amfi_code": "100001",
+ "months": [
+  {
+   "month_end": "2025-12-31",
+   "holdings": [
+    {
+     "isin": "INE000A01010",
+     "name": "Example Alpha",
+     "weight_pct": "70.0",
+     "asset_type": "equity"
+    },
+    {
+     "isin": "INE111A01011",
+     "name": "Example Beta",
+     "weight_pct": "40.0",
+     "asset_type": "equity"
+    }
+   ]
+  }
+ ]
+}
