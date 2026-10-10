@@ -298,9 +298,10 @@ def test_mf_cli_commands_have_no_write_verb() -> None:
 
 def test_holdings_server_still_has_eight_tools_and_no_mf_server_registered() -> None:
     assert len(SERVERS["holdings"].tool_names) == 8
-    # E5 ships through the CLI: the registered servers are exactly the pre-E5 set
+    # no separate mutual fund server: the mf tools live inside the `engine` server (ADR-0009)
     assert set(SERVERS) == {
         "demo",
+        "engine",
         "filings",
         "fundamentals",
         "holdings",
@@ -311,4 +312,4 @@ def test_holdings_server_still_has_eight_tools_and_no_mf_server_registered() -> 
     cfg = json.loads((ROOT / ".mcp.json").read_text())
     assert not [n for n in cfg["mcpServers"] if re.search(r"(^|[_-])(mf|mutual|funds?)($|[_-])", n)]
     allow = json.loads((ROOT / ".claude" / "settings.json").read_text())["permissions"]["allow"]
-    assert not [a for a in allow if re.search(r"__(mf|mutual|funds?)(_|$)", a)]
+    assert not [a for a in allow if re.search(r"^mcp__(mf|mutual|funds?)(_|$)", a)]

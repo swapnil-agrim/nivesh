@@ -29,7 +29,17 @@
       "mcp__news__get_next_results_date",
       "mcp__macro__get_series",
       "mcp__macro__get_flows_india",
-      "mcp__macro__get_rates_snapshot"
+      "mcp__macro__get_rates_snapshot",
+      "mcp__engine__ta_compute",
+      "mcp__engine__fa_compute",
+      "mcp__engine__valuation_range",
+      "mcp__engine__red_flags",
+      "mcp__engine__risk_metrics",
+      "mcp__engine__portfolio_xray",
+      "mcp__engine__score",
+      "mcp__engine__mf_analyse",
+      "mcp__engine__mf_overlap",
+      "mcp__engine__get_fund_meta"
     ],
     "deny": [
       "Bash",
@@ -47,6 +57,7 @@
     "fundamentals",
     "filings",
     "news",
-    "macro"
+    "macro",
+    "engine"
   ]
 }

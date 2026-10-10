@@ -1,0 +1,223 @@
+{
+  "$defs": {
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of"
+        },
+        "field": {
+          "minLength": 1,
+          "title": "Field",
+          "type": "string"
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Url"
+        },
+        "tool_call_id": {
+          "minLength": 1,
+          "title": "Tool Call Id",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "tool_call_id",
+        "field",
+        "value"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "KeyPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "claim": {
+          "maxLength": 600,
+          "minLength": 1,
+          "title": "Claim",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "claim",
+        "evidence"
+      ],
+      "title": "KeyPoint",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "enum": [
+        "keep",
+        "add",
+        "trim",
+        "exit",
+        "switch",
+        "review"
+      ],
+      "title": "Action",
+      "type": "string"
+    },
+    "agent": {
+      "const": "mf",
+      "default": "mf",
+      "title": "Agent",
+      "type": "string"
+    },
+    "as_of": {
+      "format": "date",
+      "title": "As Of",
+      "type": "string"
+    },
+    "category_fit": {
+      "default": "",
+      "title": "Category Fit",
+      "type": "string"
+    },
+    "confidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "cost_note": {
+      "default": "",
+      "title": "Cost Note",
+      "type": "string"
+    },
+    "data_gaps": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Data Gaps",
+      "type": "array"
+    },
+    "key_points": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/KeyPoint"
+      },
+      "title": "Key Points",
+      "type": "array"
+    },
+    "overlap_note": {
+      "default": "",
+      "title": "Overlap Note",
+      "type": "string"
+    },
+    "risks": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Risks",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "scheme": {
+      "minLength": 1,
+      "title": "Scheme",
+      "type": "string"
+    },
+    "score": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Score",
+      "type": "integer"
+    },
+    "security_id": {
+      "title": "Security Id",
+      "type": "integer"
+    },
+    "stance": {
+      "enum": [
+        "bullish",
+        "neutral",
+        "bearish",
+        "insufficient_data"
+      ],
+      "title": "Stance",
+      "type": "string"
+    },
+    "switch_target": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Switch Target"
+    },
+    "thesis": {
+      "title": "Thesis",
+      "type": "string"
+    }
+  },
+  "required": [
+    "security_id",
+    "scheme",
+    "as_of",
+    "stance",
+    "score",
+    "confidence",
+    "thesis",
+    "action"
+  ],
+  "title": "FundView",
+  "type": "object"
+}

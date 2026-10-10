@@ -1,0 +1,99 @@
+{
+  "$defs": {
+    "ToolRef": {
+      "additionalProperties": false,
+      "properties": {
+        "tool_call_id": {
+          "minLength": 1,
+          "title": "Tool Call Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_call_id"
+      ],
+      "title": "ToolRef",
+      "type": "object"
+    },
+    "ViewRef": {
+      "additionalProperties": false,
+      "description": "Pointer into an analyst view that the agent was given.",
+      "properties": {
+        "point_index": {
+          "minimum": 0,
+          "title": "Point Index",
+          "type": "integer"
+        },
+        "view": {
+          "title": "View",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view",
+        "point_index"
+      ],
+      "title": "ViewRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "decision": {
+      "enum": [
+        "would_buy",
+        "would_pass"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "evidence": {
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ViewRef"
+          },
+          {
+            "$ref": "#/$defs/ToolRef"
+          }
+        ]
+      },
+      "minItems": 1,
+      "title": "Evidence",
+      "type": "array"
+    },
+    "lens": {
+      "enum": [
+        "value",
+        "growth",
+        "contrarian",
+        "valuation"
+      ],
+      "title": "Lens",
+      "type": "string"
+    },
+    "paragraph": {
+      "title": "Paragraph",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "security_id": {
+      "title": "Security Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "lens",
+    "security_id",
+    "decision",
+    "paragraph",
+    "evidence"
+  ],
+  "title": "LensView",
+  "type": "object"
+}

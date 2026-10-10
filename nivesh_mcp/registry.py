@@ -1,6 +1,6 @@
 """Every MCP server must be listed here; the safety test fails on any that is not."""
 
-from nivesh_mcp import demo, filings, fundamentals, holdings, macro, market, news
+from nivesh_mcp import demo, engine, filings, fundamentals, holdings, macro, market, news
 from nivesh_mcp.base import ReadOnlyServer
 
 SERVERS: dict[str, ReadOnlyServer] = {
@@ -11,6 +11,7 @@ SERVERS: dict[str, ReadOnlyServer] = {
     "filings": filings.server,
     "news": news.server,
     "macro": macro.server,
+    "engine": engine.server,
 }
 
 # Third-party/R3 MCP servers allowed in .mcp.json besides ours. R3 is not enabled; enabling needs

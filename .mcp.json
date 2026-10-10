@@ -76,6 +76,17 @@
         "nivesh_mcp",
         "macro"
       ]
+    },
+    "engine": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "-m",
+        "nivesh_mcp",
+        "engine"
+      ]
     }
   }
 }

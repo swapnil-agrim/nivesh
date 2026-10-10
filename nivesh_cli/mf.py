@@ -6,6 +6,7 @@ from typing import Annotated
 
 import typer
 
+from nivesh_adapters import analysis_service as svc
 from nivesh_adapters.mf_data import MfHoldingsClient, MfMetaClient
 from nivesh_adapters.mf_ingest import (
     FundInputs,
@@ -15,27 +16,21 @@ from nivesh_adapters.mf_ingest import (
     ingest_holdings,
     ingest_meta,
     ingest_nav,
-    load_fund_inputs,
-    load_portfolio,
 )
 from nivesh_adapters.mf_report import (
     DiscoverReport,
     FundReport,
     ValuationReport,
     discover,
-    fund_valuation,
     run_doctor,
 )
 from nivesh_adapters.nav import AmfiNavAll, MfapiClient
 from nivesh_cli.common import user_errors
 from nivesh_cli.market import stores
 from nivesh_core.errors import NiveshError
-from nivesh_core.mf_store import get_fund_holdings, months_stored
-from nivesh_core.security_master import SecurityMaster
 from nivesh_core.timeutil import ist_date, utcnow
 from nivesh_engine.fund_screen import Constraints
-from nivesh_engine.mf_overlap import OwnedFund, look_through, overlap_matrix
-from nivesh_engine.mf_returns import FundAnalytics, analyse_fund
+from nivesh_engine.mf_returns import FundAnalytics
 
 mf_app = typer.Typer(no_args_is_help=True, help="Mutual fund data and analytics (read-only).")
 
@@ -296,13 +291,8 @@ def mf_returns(
 ) -> None:
     """Rolling returns, consistency vs the benchmark (a price index, not TRI) and risk."""
     with user_errors(), stores(ctx) as st:
-        inp = load_fund_inputs(st.duck, st.sql, st.settings, code, benchmark=benchmark)
-        cfg = st.settings.mf
-        res = analyse_fund(
-            inp.nav, inp.benchmark, windows=cfg.consistency.window_days, mar_pct=cfg.mar_pct,
-            min_alignment_pct=cfg.min_alignment_pct, option=inp.option,
-        )  # fmt: skip
-        val = fund_valuation(st.duck, st.settings, inp.security_id)
+        rep = svc.mf_returns_report(st.duck, st.sql, st.settings, code, benchmark)
+    inp, res, val = rep.inputs, rep.analytics, rep.valuation
     _print_returns(inp, res)
     _print_valuation(val)
 
@@ -311,32 +301,17 @@ def mf_returns(
 def mf_overlap(ctx: typer.Context) -> None:
     """Pairwise overlap of owned funds and look-through exposure by stock and sector."""
     with user_errors(), stores(ctx) as st:
-        book = load_portfolio(st.sql, st.settings)
-        master = SecurityMaster(st.sql)
-        held, rows = {}, {}
-        for f in book.funds:
-            months = months_stored(st.duck, f.nav_security_id)
-            if months:
-                rows[f.amfi_code] = get_fund_holdings(st.duck, f.nav_security_id, months[-1])
-            held[f.amfi_code] = f
-        isins = {r.isin for lines in rows.values() for r in lines if r.kind == "equity"}
-        isins |= {d.isin for d in book.direct}
-        sectors = {i: (master.by_isin(i)[0].sector if master.by_isin(i) else None) for i in isins}
-    if book.total <= 0:
-        raise NiveshError("no valued holdings; run `nivesh ingest` or `nivesh sync` first")
+        rep = svc.overlap_report(st.duck, st.sql, st.settings)
+    book, matrix, lt = rep.book, rep.matrix, rep.look_through
     for line in book.skipped:
         typer.echo(f"skipped: {line}", err=True)
-    owned = [OwnedFund(f.amfi_code, f.name or f.amfi_code, f.value_inr) for f in book.funds]
     typer.echo("overlap (sum of min weights over common equity ISINs; latest stored month)")
-    usable = {c: r for c, r in rows.items() if held[c].value_inr is not None}
-    matrix = overlap_matrix(usable)
     if len(matrix.codes) < 2:
         typer.echo("fewer than two funds with stored holdings; no pairs to compare")
     for i, a in enumerate(matrix.codes):
         for b in matrix.codes[i + 1 :]:
             o = matrix.get(a, b)
             typer.echo(f"{a} vs {b}: {o.overlap_pct}% ({o.common_isins} common ISINs)")
-    lt = look_through(owned, rows, sectors, book.direct, book.total)
     typer.echo(
         f"look-through of INR {lt.total_inr} (top {len(lt.stocks)} of {lt.stock_count} stocks)"
     )

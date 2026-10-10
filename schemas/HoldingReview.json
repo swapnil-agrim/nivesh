@@ -1,0 +1,146 @@
+{
+  "$defs": {
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of"
+        },
+        "field": {
+          "minLength": 1,
+          "title": "Field",
+          "type": "string"
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Url"
+        },
+        "tool_call_id": {
+          "minLength": 1,
+          "title": "Tool Call Id",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "tool_call_id",
+        "field",
+        "value"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Schema and model only in E7: no agent produces it yet.",
+  "properties": {
+    "action": {
+      "enum": [
+        "keep",
+        "add",
+        "trim",
+        "exit",
+        "review"
+      ],
+      "title": "Action",
+      "type": "string"
+    },
+    "as_of": {
+      "format": "date",
+      "title": "As Of",
+      "type": "string"
+    },
+    "evidence": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Evidence"
+      },
+      "title": "Evidence",
+      "type": "array"
+    },
+    "kill_criteria_hit": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Kill Criteria Hit",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "security_id": {
+      "title": "Security Id",
+      "type": "integer"
+    },
+    "tax_note": {
+      "default": "",
+      "title": "Tax Note",
+      "type": "string"
+    },
+    "thesis_status": {
+      "enum": [
+        "intact",
+        "weakened",
+        "broken",
+        "unknown"
+      ],
+      "title": "Thesis Status",
+      "type": "string"
+    },
+    "valuation_stretch": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Valuation Stretch"
+    }
+  },
+  "required": [
+    "security_id",
+    "as_of",
+    "action",
+    "thesis_status"
+  ],
+  "title": "HoldingReview",
+  "type": "object"
+}

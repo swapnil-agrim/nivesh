@@ -13,6 +13,7 @@ import duckdb
 import httpx
 import typer
 
+from nivesh_adapters.analysis_service import resolve_security
 from nivesh_adapters.cache import cached_fetch
 from nivesh_adapters.edgar import Edgar
 from nivesh_adapters.estimates import Estimates
@@ -43,8 +44,6 @@ from nivesh_core.errors import NiveshError
 from nivesh_core.market_store import get_news
 from nivesh_core.security_master import (
     MasterRow,
-    SecurityMaster,
-    SecurityRow,
     build_master,
     load_renames,
 )
@@ -149,19 +148,6 @@ def _india_prices() -> IndiaPrices:  # seams: tests inject MockTransport clients
 
 def _us_prices() -> UsPrices:
     return UsPrices()
-
-
-def resolve_security(sql: sqlite3.Connection, query: str) -> SecurityRow:
-    """One security for an ISIN/symbol/name, else an error listing up to 5 candidates."""
-    master = SecurityMaster(sql)
-    found = master.lookup(query)
-    row = master.get(found.security_id) if found.security_id is not None else None
-    if row is not None:
-        return row
-    if found.candidates:
-        names = ", ".join(f"{c.symbol} ({c.exchange})" for c in found.candidates[:5])
-        raise NiveshError(f"{query!r} is ambiguous; candidates: {names}")
-    raise NiveshError(f"no security matches {query!r}; run `nivesh master build` first")
 
 
 def _day(value: str, name: str) -> date:

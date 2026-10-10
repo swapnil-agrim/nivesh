@@ -1,0 +1,139 @@
+{
+  "$defs": {
+    "Claim": {
+      "additionalProperties": false,
+      "properties": {
+        "claim": {
+          "maxLength": 600,
+          "minLength": 1,
+          "title": "Claim",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ViewRef"
+              },
+              {
+                "$ref": "#/$defs/ToolRef"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "claim",
+        "evidence"
+      ],
+      "title": "Claim",
+      "type": "object"
+    },
+    "ToolRef": {
+      "additionalProperties": false,
+      "properties": {
+        "tool_call_id": {
+          "minLength": 1,
+          "title": "Tool Call Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_call_id"
+      ],
+      "title": "ToolRef",
+      "type": "object"
+    },
+    "ViewRef": {
+      "additionalProperties": false,
+      "description": "Pointer into an analyst view that the agent was given.",
+      "properties": {
+        "point_index": {
+          "minimum": 0,
+          "title": "Point Index",
+          "type": "integer"
+        },
+        "view": {
+          "title": "View",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view",
+        "point_index"
+      ],
+      "title": "ViewRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "claims": {
+      "items": {
+        "$ref": "#/$defs/Claim"
+      },
+      "minItems": 1,
+      "title": "Claims",
+      "type": "array"
+    },
+    "rebuts": {
+      "default": [],
+      "items": {
+        "type": "integer"
+      },
+      "title": "Rebuts",
+      "type": "array"
+    },
+    "round": {
+      "minimum": 1,
+      "title": "Round",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "security_id": {
+      "title": "Security Id",
+      "type": "integer"
+    },
+    "side": {
+      "enum": [
+        "bull",
+        "bear"
+      ],
+      "title": "Side",
+      "type": "string"
+    },
+    "strongest_unrebutted": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Strongest Unrebutted"
+    },
+    "summary": {
+      "default": false,
+      "title": "Summary",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "security_id",
+    "round",
+    "side",
+    "claims"
+  ],
+  "title": "DebateTurn",
+  "type": "object"
+}
