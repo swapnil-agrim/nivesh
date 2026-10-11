@@ -9,7 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from nivesh_core.agents_config import AgentsSettings
 from nivesh_core.analysis_config import AnalysisSettings
+from nivesh_core.delivery_config import DeliverySettings
 from nivesh_core.errors import ConfigError
+from nivesh_core.report_config import ReportSettings
 from nivesh_core.review_config import ReviewSettings
 from nivesh_core.secrets import REF_RE
 from nivesh_core.universe_config import IdeasSettings, UniverseSettings
@@ -314,6 +316,8 @@ class Settings(BaseModel):
     review: ReviewSettings = ReviewSettings()
     universe: UniverseSettings = UniverseSettings()
     ideas: IdeasSettings = IdeasSettings()
+    report: ReportSettings = ReportSettings()
+    delivery: DeliverySettings = DeliverySettings()
 
     @field_validator("registered_ip")
     @classmethod

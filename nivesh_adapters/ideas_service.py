@@ -9,7 +9,7 @@ import re
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -18,6 +18,8 @@ import duckdb
 
 from nivesh_adapters import analysis_service as svc
 from nivesh_adapters.analysis_data import benchmark_for, load_bars, load_screen_inputs
+from nivesh_adapters.report import Report
+from nivesh_adapters.report_templates import IdeaEntry, IdeasInput, ideas_report
 from nivesh_adapters.universe_service import resolve_universe
 from nivesh_agents.schemas import CommitteeVerdict
 from nivesh_core.config import Settings
@@ -29,7 +31,7 @@ from nivesh_core.security_master import SecurityMaster, SecurityRow
 from nivesh_engine.metrics import inputs_needed
 from nivesh_engine.scoring import ScoreCard
 from nivesh_engine.screen import RuleSet, parse_rules, screen
-from nivesh_engine.shortlist import Scored, Shortlist, shortlist
+from nivesh_engine.shortlist import Ranking, Scored, Shortlist, shortlist
 
 PRESET_NAME = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 SCREENS_DIR = "screens"
@@ -230,3 +232,32 @@ def render_idea(
         f"   what would prove this wrong: {v.bear_case}",
         f"   review by {v.review_date}; preset {preset}",
     ]
+
+
+def idea_report(
+    *, run_at: datetime, run_id: int, day: date, preset: str, count: int,
+    verdicts: Sequence[CommitteeVerdict], ranking: Ranking, facts: IdeaFacts,
+    labels: dict[int, str], cards: dict[int, ScoreCard], notes: Sequence[str],
+) -> tuple[Report, dict[str, Any]]:  # fmt: skip
+    """The ideas report and the code-produced facts it is checked against: the stored close,
+    benchmark level and score card per security. The committee's own words are not facts."""
+    by_id = {v.security_id: v for v in verdicts}
+    entries = tuple(
+        IdeaEntry(i, x.symbol, facts.names[x.security_id].market, labels.get(x.security_id, ""),
+                  by_id[x.security_id])
+        for i, x in enumerate(ranking.ideas, start=1)
+    )  # fmt: skip
+    shown: dict[str, Any] = {}
+    for v in verdicts:
+        card = cards.get(v.security_id)
+        shown[str(v.security_id)] = {
+            "last_close": facts.last_close.get(v.security_id),
+            "benchmark": facts.benchmark.get(v.security_id, (None, None))[0],
+            "composite": None if card is None else card.composite,
+            "factors": {} if card is None else dict(card.factors),
+        }
+    report = ideas_report(IdeasInput(
+        run_at=run_at, as_of=day, preset=preset, entries=entries, wanted=count,
+        qualified=ranking.qualified, message=ranking.message, notes=tuple(notes), run_id=run_id,
+    ))  # fmt: skip
+    return report, {"as_of": day, "by_security": shown}

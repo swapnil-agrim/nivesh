@@ -1,4 +1,5 @@
 import json
+import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from nivesh_agents import runtime
 from nivesh_agents.runtime import AgentRunError, build_options, load_command, run_command
 from nivesh_cli.main import app
 from nivesh_mcp.registry import SERVERS
+from tests.run_paths import run_col, run_path
 
 ROOT = Path(__file__).resolve().parents[2]
 FORBIDDEN = {"Bash", "Write", "Edit", "WebFetch", "WebSearch", "NotebookEdit"}
@@ -235,9 +237,9 @@ def test_cli_run_records_row_and_trace(tmp_path: Path, monkeypatch: pytest.Monke
     r = CliRunner().invoke(app, [*cfg_dir(tmp_path), "run", "ping"])
     assert r.exit_code == 0, r.output
     ((status, tier, model, tok, cost, rdir),) = rows(tmp_path)
-    assert (status, tier, model, tok, rdir) == ("ok", "quick", "claude-test", 100, "runs/1")
-    assert cost > 0
-    assert (tmp_path / "dd" / "runs" / "1" / "trace.jsonl").is_file()
+    assert (status, tier, model, tok) == ("ok", "quick", "claude-test", 100)
+    assert re.fullmatch(run_col(1), rdir) and cost > 0
+    assert (run_path(tmp_path / "dd", 1) / "trace.jsonl").is_file()
 
 
 def test_cli_run_error_row_and_redacted_trace(
@@ -247,7 +249,7 @@ def test_cli_run_error_row_and_redacted_trace(
     r = CliRunner().invoke(app, [*cfg_dir(tmp_path), "run", "ping"])
     assert r.exit_code == 1
     assert rows(tmp_path)[0][0] == "error"
-    recs = read_trace(tmp_path / "dd" / "runs" / "1" / "trace.jsonl")
+    recs = read_trace(run_path(tmp_path / "dd", 1) / "trace.jsonl")
     assert recs[-1]["type"] == "error" and "abc.def123" not in recs[-1]["message"]
 
 

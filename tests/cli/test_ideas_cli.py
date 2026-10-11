@@ -22,6 +22,7 @@ from nivesh_core.timeutil import to_iso, utcnow
 from tests.agents import committee_fx as fx
 from tests.agents.fake_sdk import FakeSDK
 from tests.ideas_fx import ASOF, hold, seed_ideas_store, with_benchmarks
+from tests.run_paths import run_path
 
 runner = CliRunner()
 Env = tuple[list[str], Path]
@@ -112,10 +113,10 @@ def test_ideas_uses_deep_tier(env: Env, fake: FakeSDK) -> None:
     assert call(env, "ideas", "india", "2").exit_code == 0
     c = sqlite3.connect(env[1] / "nivesh.sqlite")
     assert c.execute("SELECT command, status, tier FROM run").fetchall() == [
-        ("ideas", "ok", "deep")
+        ("ideas", "needs_review", "deep")  # the fake verdict's entry zone has no evidence (E10)
     ]
     c.close()
-    snap = json.loads((env[1] / "runs" / "1" / "snapshot.json").read_text())
+    snap = json.loads((run_path(env[1], 1) / "snapshot.json").read_text())
     assert snap["tier"] == "deep"
     assert fake.counts.get("lens_value", 0) > 0 and fake.counts["bull"] > 0  # deep-only stages
 
@@ -191,7 +192,7 @@ def test_ledger_row_has_run_id_input_hash_prompt_and_model_versions_and_last_clo
 ) -> None:
     assert call(env, "ideas", "india", "2").exit_code == 0
     rows = ledger(env)
-    snap = json.loads((env[1] / "runs" / "1" / "snapshot.json").read_text())
+    snap = json.loads((run_path(env[1], 1) / "snapshot.json").read_text())
     duck = open_duck(env[1] / "nivesh.duckdb", read_only=True)
     try:
         for row in rows:
@@ -365,3 +366,21 @@ def test_stale_membership_prints_a_warning_and_still_runs(
     r = call(env, "ideas", "india", "1")
     assert r.exit_code == 0, r.output
     assert "warning: NIFTY500 membership is" in r.output
+
+
+def test_report_step_failure_keeps_the_ledger_rows_and_flags_needs_review(
+    env: Env, fake: FakeSDK, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import nivesh_cli.ideas as cideas
+
+    def boom(*a: object, **k: object) -> None:
+        raise RuntimeError("detail that must stay out")
+
+    monkeypatch.setattr(cideas, "save_report", boom)
+    r = call(env, "ideas", "india", "2")
+    assert r.exit_code == 0, r.output
+    assert "report step failed (RuntimeError)" in r.output and "must stay out" not in r.output
+    assert len(ledger(env)) > 0
+    c = sqlite3.connect(env[1] / "nivesh.sqlite")
+    assert c.execute("SELECT status FROM run").fetchall() == [("needs_review",)]
+    c.close()

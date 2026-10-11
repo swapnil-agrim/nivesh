@@ -22,6 +22,7 @@ from nivesh_adapters.investright_session import (
     serve_callback_once,
     token_path,
 )
+from nivesh_adapters.status_service import ingest_summary
 from nivesh_cli.common import settings_of, user_errors
 from nivesh_core.db import init_stores
 from nivesh_core.db.sqlite import open_sqlite
@@ -180,6 +181,16 @@ def ingest(ctx: typer.Context) -> None:
             typer.echo(f"  warning: {w}")
     if result.skipped:
         typer.echo(f"skipped {len(result.skipped)} already ingested file(s)")
+    if not result.reports:
+        if not result.errors:
+            typer.echo("nothing new to ingest")
+    else:
+        conn = open_sqlite(data_dir / "nivesh.sqlite")
+        try:
+            for line in ingest_summary(conn, ctx.obj[0].investright.demat_ref):
+                typer.echo(line)
+        finally:
+            conn.close()
     for err in result.errors:
         typer.echo(f"error: {err}", err=True)
     if result.errors:

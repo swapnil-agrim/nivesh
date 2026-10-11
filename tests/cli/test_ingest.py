@@ -125,3 +125,22 @@ def test_ingest_output_contains_no_pii(ready: Env) -> None:
     assert scan_text(r.output) == []
     for pii in pii_strings():
         assert pii not in r.output
+
+
+def test_ingest_prints_reconciliation_summary_from_recon_items_and_source_coverage(
+    ready: Env,
+) -> None:
+    args, _ = ready
+    r = runner.invoke(app, [*args, "ingest"])
+    assert r.exit_code == 0, r.output
+    assert "holdings by source: cas_demat" in r.output
+    assert "reconciliation: no differences (or only one source stored)" in r.output
+    assert r.output.index("statement ") < r.output.index("holdings by source")
+
+
+def test_ingest_with_nothing_new_says_so(ready: Env) -> None:
+    args, _ = ready
+    runner.invoke(app, [*args, "ingest"])
+    r = runner.invoke(app, [*args, "ingest"])
+    assert "skipped 2" in r.output and "nothing new to ingest" in r.output
+    assert "holdings by source" not in r.output

@@ -9,7 +9,7 @@ from nivesh_mcp.base import _desc_write_words, is_write_name
 ROOT = Path(__file__).resolve().parents[2]
 ENGINE = (
     "dmath metric bars ta levels regime setups fa valuation redflags xray risk metrics screen "
-    "scoring committee_rules tax_lots review_rules rebalance universe shortlist"
+    "scoring committee_rules tax_lots review_rules rebalance universe shortlist money citations"
 ).split()
 MODULES = [
     *(ROOT / "nivesh_engine" / f"{n}.py" for n in ENGINE),

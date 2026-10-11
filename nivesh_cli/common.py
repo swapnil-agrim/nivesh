@@ -2,6 +2,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 import typer
@@ -15,7 +16,7 @@ from nivesh_core.errors import NiveshError, SecretNotFound
 from nivesh_core.paths import run_dir
 from nivesh_core.profile import Profile
 from nivesh_core.secrets import SecretRef
-from nivesh_core.timeutil import to_iso, utcnow
+from nivesh_core.timeutil import ist_date, to_iso, utcnow
 from nivesh_core.trace import Tracer
 
 
@@ -83,8 +84,9 @@ def metered_run(
             typer.echo(f"warning: {decision.message}", err=True)
         if not decision.allowed:
             raise typer.Exit(1)
-        run_id = _start_run(conn, command, decision.tier)
-        rdir = run_dir(data_dir, run_id)
+        day = ist_date(utcnow())
+        run_id = _start_run(conn, command, decision.tier, day)
+        rdir = run_dir(data_dir, run_id, day)
         m = Metered(run_id, decision.tier, Tracer(rdir, run_id), rdir, env)
         try:
             yield m
@@ -94,13 +96,34 @@ def metered_run(
         conn.close()
 
 
-def _start_run(conn: sqlite3.Connection, command: str, tier: str) -> int:
+@contextmanager
+def plain_run(settings: Settings, command: str) -> Iterator[Metered]:
+    """A run row, dated directory and trace for a command that spends nothing: no budget gate,
+    no egress check, no credentials. Set `status` to "ok" when the work succeeds."""
+    data_dir = Path(settings.data_dir)
+    with user_errors():
+        init_stores(data_dir)
+    conn = open_sqlite(data_dir / "nivesh.sqlite")
+    try:
+        day = ist_date(utcnow())
+        run_id = _start_run(conn, command, "none", day)
+        rdir = run_dir(data_dir, run_id, day)
+        m = Metered(run_id, "none", Tracer(rdir, run_id), rdir)
+        try:
+            yield m
+        finally:
+            _finish_run(conn, run_id, m.status, m.tracer)
+    finally:
+        conn.close()
+
+
+def _start_run(conn: sqlite3.Connection, command: str, tier: str, day: date) -> int:
     cur = conn.execute(
         "INSERT INTO run (command, started_at, status, tier) VALUES (?, ?, 'running', ?)",
         (command, to_iso(utcnow()), tier),
     )
     run_id = int(cur.lastrowid or 0)
-    conn.execute("UPDATE run SET run_dir = ? WHERE id = ?", (f"runs/{run_id}", run_id))
+    conn.execute("UPDATE run SET run_dir = ? WHERE id = ?", (f"runs/{day}/{run_id}", run_id))
     return run_id
 
 
