@@ -121,3 +121,5 @@ an example the owner tunes.
 - X8: a live check of `/ideas` with a real SDK: verdict quality, cost per run, deep-tier behaviour.
 - X9: owner sign-off of the defaults (floors, 35-day staleness, shortlist 8 and max 12, sector cap 2, held label, preset thresholds, the qualifying verdicts, record-all-verdicts).
 - X10: India operating-income semantics (profit before tax) make `roce` and `roic` unavailable for Indian names; presets use `roe` until the statement items exist.
+
+Note (ADR-0013): the ledger's `last_close` is the split-adjusted close as of the issue date, for display only; scoring and annual turnover are in `docs/adr/0013-ledger-scoring-evaluation.md` (X4 above is resolved there for scoring, the scorecard and turnover; the memory server stays deferred).

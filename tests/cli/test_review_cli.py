@@ -188,8 +188,54 @@ def test_review_holdings_json_is_schema_valid(cli_env: Env, held: Any) -> None:
     assert isinstance(date.fromisoformat(one["as_of"]), date)
 
 
+def ledger_rows_of(env: Env) -> list[Any]:
+    c = sqlite3.connect(env[1] / "nivesh.sqlite")
+    try:
+        return c.execute(
+            "SELECT verdict, conviction, horizon, source, as_of, price_date, run_id, last_close "
+            "FROM ledger_entry ORDER BY id"
+        ).fetchall()
+    finally:
+        c.close()
+
+
+def test_review_holdings_appends_a_ledger_row_per_call_and_leaves_stdout_unchanged(
+    cli_env: Env, held: Any
+) -> None:
+    args = [*cli_env[0], "review", "holdings", "--only", "RELI", "--json"]
+    first = runner.invoke(app, args)
+    assert first.exit_code == 0, first.output
+    (row,) = ledger_rows_of(cli_env)
+    assert row[:4] == ("TRIM", "medium", "long_term_1y_plus", "holding_review")
+    assert (
+        row[4] == CLI_ASOF.isoformat()
+        and row[5] is not None
+        and row[5] <= row[4]
+        and row[6] == 1
+        and row[7] is None
+    )
+    second = runner.invoke(app, args)
+    assert second.stdout == first.stdout  # unchanged by the ledger write
+    assert len(ledger_rows_of(cli_env)) == 2  # a rerun appends, nothing is deduped
+
+
+def test_a_ledger_failure_is_a_warning_and_the_reviews_still_print(
+    cli_env: Env, held: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import nivesh_cli.review as creview
+
+    def boom(*a: Any, **k: Any) -> None:
+        raise sqlite3.OperationalError("disk")
+
+    monkeypatch.setattr(creview, "record_calls", boom)
+    r = runner.invoke(app, [*cli_env[0], "review", "holdings", "--only", "RELI"])
+    assert r.exit_code == 0 and "warning: the ledger rows were not saved" in r.output
+    assert any(x.startswith("RELI") for x in r.output.splitlines())
+    assert run_rows(cli_env)[0][1] == "ok" and ledger_rows_of(cli_env) == []
+
+
 # ---- review rebalance (no model, no write) ---------------------------------------------------
-def test_review_rebalance_prints_moves_pro_forma_turnover_and_per_proposal_cap_note(
+def test_review_rebalance_prints_moves_pro_forma_turnover_and_the_annual_cap_note(
     env: Env,
 ) -> None:
     r = call(env, "review", "rebalance")
@@ -200,7 +246,8 @@ def test_review_rebalance_prints_moves_pro_forma_turnover_and_per_proposal_cap_n
     assert any(x.split()[:3] == ["add", "debt", "-"] and "(proceeds)" in x for x in lines)
     assert "  equity       66.67 -> 65.00 vs 60.0" in lines
     assert "turnover: 1.67% of the portfolio" in lines
-    assert "note: per-proposal cap; annual turnover not tracked yet" in lines
+    assert "note: no acted sales recorded this year" in lines
+    assert "turnover cap 30% per year, net of acted sales" in lines[0]
     assert "note: no target for unclassified: left as is" in lines
     assert "note: still out of band: debt, gold" in lines
     assert "note: Apple Inc: left out (no INR value)" in lines
@@ -274,3 +321,47 @@ def test_review_tax_trim_not_finite_exits_1_with_message(env: Env) -> None:
         r = call(env, "review", "tax", ISIN_B, "--trim", bad)
         assert r.exit_code == 1 and isinstance(r.exception, SystemExit), bad
         assert "--trim must be a finite number" in r.output, bad
+
+
+def sold_this_year(env: Env, amount_inr: str) -> None:
+    """An acted SELL decision of `amount_inr` rupees (quantity 1) dated this year."""
+    from datetime import UTC, datetime
+
+    from nivesh_core.ledger import LedgerEntry, record_call, record_decision
+
+    c = sqlite3.connect(env[1] / "nivesh.sqlite", isolation_level=None)
+    sid = c.execute("SELECT id FROM security WHERE symbol = 'RELI'").fetchone()[0]
+    c.execute(
+        "INSERT OR IGNORE INTO run (id, command, started_at, status) "
+        "VALUES (91, 'ideas', 't', 'ok')"
+    )
+    eid = record_call(
+        c,
+        LedgerEntry(
+            run_id=91, security_id=sid, verdict="SELL", horizon="long_term_1y_plus",
+            conviction="high", review_date=date(2027, 1, 1), benchmark_reason="none",
+            input_hash="h", prompt_versions={}, model_versions={}, reported=True,
+        ),
+    )  # fmt: skip
+    now = datetime(2026, 9, 30, 12, tzinfo=UTC)
+    record_decision(c, eid, "acted", qty=Decimal(1), price=Decimal(amount_inr), now=now)
+    c.close()
+
+
+def test_an_acted_sale_this_year_shrinks_the_next_rebalance_plan(env: Env) -> None:
+    base = json.loads(call(env, "review", "rebalance", "--json").stdout)["plan"]
+    total = sum(Decimal(str(x["after_inr"])) for x in base["pro_forma"])
+    assert Decimal(str(base["turnover_pct"])) > 0
+    sold_this_year(env, str((total * Decimal("0.295")).quantize(Decimal("1"))))
+    r = call(env, "review", "rebalance")
+    assert r.exit_code == 0, r.output
+    after = json.loads(call(env, "review", "rebalance", "--json").stdout)["plan"]
+    assert 0 < Decimal(str(after["turnover_pct"])) < Decimal(str(base["turnover_pct"]))
+    assert "year-to-date sold 29.50% of the 30% cap (from the decision ledger)" in r.output
+    assert "year-to-date sales come from 1 acted decisions" in r.output
+    sold_this_year_all = str(total * 2)
+    sold_this_year(env, sold_this_year_all)  # more than the whole cap
+    capped = json.loads(call(env, "review", "rebalance", "--json").stdout)["plan"]
+    assert Decimal(str(capped["turnover_pct"])) == 0
+    assert not any(m["kind"] == "reduce" for m in capped["moves"])
+    assert any("turnover cap 30% reached" in n for n in capped["notes"])

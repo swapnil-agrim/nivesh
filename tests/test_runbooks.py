@@ -50,3 +50,12 @@ def test_vm_guide_links_runbook() -> None:
 def test_vm_guide_and_runbook_agree_on_callback_port() -> None:
     assert "-L 8765:localhost:8765" in VM and "8080" not in VM
     assert re.search(r"127\.0\.0\.1:8765/callback", RUNBOOK)
+
+
+def test_scorecard_runbook_names_the_commands_in_order_and_has_no_pii() -> None:
+    text = (ROOT / "docs" / "runbooks" / "scorecard.md").read_text()
+    order = [text.index(f"`nivesh {c}") for c in ("rescore", "scorecard", "calibration")]
+    assert order == sorted(order) and "nivesh decide" in text
+    for needle in ("price index", "not enough data", "--corrects", "not advice"):
+        assert needle in text, needle
+    assert scan_text(text) == []

@@ -10,6 +10,7 @@ the top n flagged as reported. Output is an example for the owner to judge, not 
 
 import asyncio
 import json
+import sqlite3
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
@@ -46,7 +47,7 @@ from nivesh_cli.engine import AsJson, _as_of, reader
 from nivesh_core.config import Settings
 from nivesh_core.db.sqlite import open_sqlite
 from nivesh_core.errors import NiveshError
-from nivesh_core.ledger import record_call
+from nivesh_core.ledger import record_calls
 from nivesh_core.profile import Profile
 from nivesh_core.timeutil import utcnow
 from nivesh_engine.shortlist import IdeaVerdict, Ranking, ShortRow, rank_ideas
@@ -139,13 +140,14 @@ def ideas_cmd(
         result, run_id, results = _run(settings, profile, inputs, force, after)
         ranking = held["ranking"]
         rows = ledger_rows(
-            result.verdicts, run_id=run_id, run_dir=results, facts=facts,
+            result.verdicts, run_id=run_id, run_dir=results, facts=facts, day=day,
             preset_of={r.security_id: name for _, r in picks}, reported_ids=ranking.reported_ids,
         )  # fmt: skip
         sql = open_sqlite(Path(settings.data_dir) / "nivesh.sqlite")
         try:
-            for row in rows:
-                record_call(sql, row)
+            record_calls(sql, rows)
+        except sqlite3.Error as e:
+            raise NiveshError(f"the ledger write failed, nothing was recorded ({e})") from e
         finally:
             sql.close()
     _report(found, picks, result, ranking, facts, name, day, notes, run_id, len(rows), as_json)

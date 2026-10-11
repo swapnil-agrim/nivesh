@@ -192,3 +192,42 @@ def test_golden_matches(name: str) -> None:
     r = BUILDERS[name]()
     assert to_markdown(r) == (FIX / f"{name}.md").read_text()
     assert to_html(r) == (FIX / f"{name}.html").read_text()
+
+
+def test_scorecard_groups_show_hit_excess_worst_and_not_enough_data() -> None:
+    from nivesh_adapters.report_templates import ScoreGroup, ScoreRow
+    from nivesh_core.pii_scan import scan_text
+
+    enough = ScoreRow("BUY", 25, 25, D("80"), D("0.8"), D("2"), D("-6"), True)
+    thin = ScoreRow("SELL", 19, 19, D("52.63"), D("1"), D("1"), D("-1"), False)
+    acted = ScoreRow("acted", 3, 2, None, None, None, None, False)
+    inp = scorecard_input(
+        rows=(
+            ScoreRow("13 weeks", 25, 25, D("80"), D("0.8")),
+            ScoreRow("4 weeks", 19, 19, D("50"), enough=False),
+        ),
+        basis_note="price index, not TRI",
+        groups=(ScoreGroup("By verdict (13 weeks)", (enough, thin)), ScoreGroup("Acted", (acted,)),
+                ScoreGroup("Empty", ())),
+        notes=("6 call-horizon pairs are waiting for price data (pending)",),
+    )  # fmt: skip
+    r = scorecard_report(inp)
+    md = to_markdown(r)
+    assert (
+        "- BUY: 25 calls, 25 scored, hit rate 80.0%, mean excess 0.80%, median 2.00%, worst -6.00%"
+        in md
+    )
+    assert "- SELL: 19 calls, 19 scored, not enough data" in md
+    assert "52.6" not in md  # a thin bucket's percentage is not shown
+    assert (
+        "| 4 weeks | 19 | 19 | not enough data |" in md and "| 13 weeks | 25 | 25 | 80.0% |" in md
+    )
+    assert "- acted: 3 calls, 2 scored, not enough data" in md and "- No calls." in md
+    assert "price index, not TRI" in r.summary[1] and "waiting for price data" in md
+    assert not re.search(r"\d{9,18}", md) and scan_text(md) == []
+    assert len(r.nums) > 0  # every shown number is registered for the citation check
+    assert "no hit rate" in to_markdown(
+        scorecard_report(
+            scorecard_input(groups=(ScoreGroup("G", (ScoreRow("HOLD", 2, 2, None),)),))
+        )
+    )

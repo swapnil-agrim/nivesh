@@ -19,7 +19,7 @@ from nivesh_mcp.registry import SERVERS
 ROOT = Path(__file__).resolve().parents[2]
 COMMANDS = ROOT / ".claude" / "commands"
 FILES = sorted(p for p in COMMANDS.glob("*.md") if p.stem != "ping")  # ping is the E1 demo
-EXPECTED = {"research", "ta", "fa", "brief", "ideas", "watch", "status", "ingest"}
+EXPECTED = {"research", "ta", "fa", "brief", "ideas", "watch", "status", "ingest", "scorecard"}
 REGISTRY = {f"mcp__{n}__{t}" for n, srv in SERVERS.items() for t in srv.tool_names}
 BANNED = {"Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch"}
 

@@ -93,9 +93,11 @@ def _rank(p: Position) -> tuple[int, Decimal, str]:
 
 def propose_moves(
     targets: Mapping[str, Decimal], positions: Sequence[Position], *, band_pp: Decimal,
-    new_cash: Decimal = ZERO, turnover_limit_pct: Decimal,
+    new_cash: Decimal = ZERO, turnover_limit_pct: Decimal, ytd_sold_inr: Decimal = ZERO,
 ) -> RebalancePlan:  # fmt: skip
-    """Moves (add per class, reduce per holding), pro-forma weights and turnover in percent."""
+    """Moves (add per class, reduce per holding), pro-forma weights and turnover in percent. The
+    cap is a calendar-year amount: what the decision ledger shows as already sold this year
+    (`ytd_sold_inr`) is taken off it, never below zero."""
     total = sum((p.value_inr for p in positions), ZERO)
     if not targets:
         return RebalancePlan(reason="no target allocation in the profile")
@@ -127,7 +129,7 @@ def propose_moves(
             cash[c] = cash.get(c, ZERO) + a
         add(cash, "new cash")
 
-    limit = turnover_limit_pct * total / HUNDRED
+    limit = max(turnover_limit_pct * total / HUNDRED - ytd_sold_inr, ZERO)
     used = ZERO
     over = {c: value[c] - (tgt[c] + band_pp) * grand / HUNDRED for c in classes}
     reducible = (c for c in classes if over[c] > 0 and c in targets)
@@ -166,5 +168,11 @@ def propose_moves(
         )
     elif out:
         notes.append(f"still out of band: {', '.join(out)}")
-    notes.append("per-proposal cap; annual turnover not tracked yet")
+    if ytd_sold_inr > 0:
+        notes.append(
+            f"year-to-date sold {_pct(ytd_sold_inr, total)}% of the {turnover_limit_pct}% cap "
+            "(from the decision ledger)"
+        )
+    else:
+        notes.append("no acted sales recorded this year")
     return RebalancePlan(tuple(moves), lines, _pct(used, total), not out, tuple(notes))

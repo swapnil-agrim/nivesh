@@ -17,6 +17,7 @@ from nivesh_cli.market import market_app, master_app
 from nivesh_cli.mf import mf_app
 from nivesh_cli.research import research_app
 from nivesh_cli.review import review_app
+from nivesh_cli.scorecard import scorecard_app
 from nivesh_cli.thesis import thesis_app
 from nivesh_cli.universe import universe_app
 from nivesh_cli.watch import watch_app
@@ -44,6 +45,9 @@ app.registered_commands.extend(ideas_app.registered_commands)  # ideas
 app.registered_commands.extend(research_app.registered_commands)  # research
 app.registered_commands.extend(brief_app.registered_commands)  # brief
 app.registered_commands.extend(deliver_app.registered_commands)  # deliver
+app.registered_commands.extend(
+    scorecard_app.registered_commands
+)  # decide, rescore, scorecard, calibration
 app.add_typer(master_app, name="master")
 app.add_typer(market_app, name="market")
 app.add_typer(mf_app, name="mf")

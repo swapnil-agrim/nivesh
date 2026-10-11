@@ -139,3 +139,26 @@ def test_service_never_writes_to_stores(tmp_path: Path) -> None:
     before = snapshot(tmp_path / "d")
     run_short(tmp_path / "d")
     assert snapshot(tmp_path / "d") == before
+
+
+def test_facts_carry_the_date_of_the_bar_the_close_came_from(tmp_path: Path) -> None:
+    from datetime import timedelta
+
+    data = tmp_path / "data"
+    seed_ideas_store(data)
+    sql = open_sqlite(data / "nivesh.sqlite")
+    sql.execute(
+        "INSERT INTO security (id, symbol, exchange, currency) "
+        "VALUES (9999, 'NOBARS', 'NSE', 'INR')"
+    )
+    duck = open_duck(data / "nivesh.duckdb", read_only=True)
+    try:
+        some = sql.execute("SELECT id FROM security WHERE symbol = 'BENCHIN'").fetchone()[0]
+        facts = isvc.gather_facts(
+            duck, sql, settings_for(data), [some, 9999], ASOF + timedelta(days=2)
+        )
+    finally:
+        duck.close()
+        sql.close()
+    assert facts.closing_date[some] == ASOF  # two days before the run day
+    assert 9999 not in facts.closing_date and 9999 not in facts.last_close

@@ -433,10 +433,22 @@ def brief_report(inp: BriefInput) -> Report:
 # ---- scorecard -----------------------------------------------------------------------------
 @dataclass(frozen=True)
 class ScoreRow:
-    horizon: str
+    horizon: str  # the row label: a horizon, or the value of the dimension it belongs to
     calls: int
     scored: int
     hit_pct: Decimal | None
+    mean_excess: Decimal | None = None
+    median_excess: Decimal | None = None
+    worst: Decimal | None = None
+    enough: bool = True  # False: too few scored calls, so the numbers are not shown
+
+
+@dataclass(frozen=True)
+class ScoreGroup:
+    """Rows of one dimension (verdict, market, ...), shown as a list under their own heading."""
+
+    title: str
+    rows: tuple[ScoreRow, ...]
 
 
 @dataclass(frozen=True)
@@ -445,6 +457,24 @@ class ScorecardInput:
     as_of: date
     rows: tuple[ScoreRow, ...]
     run_id: int | None = None
+    basis_note: str = ""
+    groups: tuple[ScoreGroup, ...] = ()
+    notes: tuple[str, ...] = ()  # data gaps the loader found (pending calls, folded rows)
+
+
+NOT_ENOUGH = "not enough data"
+
+
+def _score_line(f: _Fmt, r: ScoreRow) -> str:
+    head = f"{r.horizon}: {f.num(Decimal(r.calls), 0)} calls, {f.num(Decimal(r.scored), 0)} scored"
+    if not r.enough:
+        return f"{head}, {NOT_ENOUGH}"
+    if r.hit_pct is None:
+        return f"{head}, no hit rate"
+    return (
+        f"{head}, hit rate {f.pct(r.hit_pct)}, mean excess {f.pct(r.mean_excess, 2)}, "
+        f"median {f.pct(r.median_excess, 2)}, worst {f.pct(r.worst, 2)}"
+    )
 
 
 def scorecard_report(inp: ScorecardInput) -> Report:
@@ -452,19 +482,30 @@ def scorecard_report(inp: ScorecardInput) -> Report:
     f = _Fmt()
     scored = sum(r.scored for r in inp.rows)
     table = tuple(
-        (r.horizon, f.num(Decimal(r.calls), 0), f.num(Decimal(r.scored), 0), f.pct(r.hit_pct))
+        (
+            f.code(r.horizon), f.num(Decimal(r.calls), 0), f.num(Decimal(r.scored), 0),
+            f.pct(r.hit_pct) if r.enough else NOT_ENOUGH,
+        )
         for r in inp.rows
     )  # fmt: skip
+    gaps = list(inp.notes)
     if scored == 0:
         body = "Not enough data yet: no call has reached its scoring date."
-        gaps = ["no scored calls"]
+        gaps.insert(0, "no scored calls")
     else:
-        body = f"{f.num(Decimal(scored), 0)} calls scored across {len(inp.rows)} horizons."
-        gaps = []
+        body = (
+            f"{f.num(Decimal(scored), 0)} scored results across "
+            f"{f.num(Decimal(len(inp.rows)), 0)} horizons."
+        )
+    summary = [body, *([inp.basis_note] if inp.basis_note else [])]
+    blocks = [Block("scorecard", "Scorecard", body, False)]
+    for i, g in enumerate(inp.groups, start=1):
+        lines = [_score_line(f, r) for r in g.rows] or ["No calls."]
+        blocks.append(Block(f"scorecard.{i}", g.title, _bullets(lines), False))
     return _report(
-        f, "Scorecard", inp.run_at, inp.run_id, (inp.as_of,), [body],
+        f, "Scorecard", inp.run_at, inp.run_id, (inp.as_of,), summary,
         Table(("Horizon", "Calls", "Scored", "Hit rate"), table),
-        (Block("scorecard", "Scorecard", body, False),), gaps, ["append-only call ledger"],
+        tuple(blocks), gaps, ["append-only call ledger"],
     )  # fmt: skip
 
 

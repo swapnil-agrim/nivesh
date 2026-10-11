@@ -129,6 +129,11 @@ def _index(sql: sqlite3.Connection, name: str, where: str) -> IndexRef:
     return IndexRef(int(row[0]), str(row[1]))
 
 
+def index_ref(sql: sqlite3.Connection, name: str, where: str) -> IndexRef:
+    """The index named `name` from the config block `where`, or why it cannot be found."""
+    return _index(sql, name, where)
+
+
 def benchmark_for(sql: sqlite3.Connection, sec: SecurityRow, cfg: AnalysisSettings) -> IndexRef:
     """The market benchmark index for a security, from `analysis.ta.benchmarks`."""
     name = cfg.ta.benchmarks.get(sec.market)
