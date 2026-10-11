@@ -2,15 +2,20 @@ import asyncio
 from pathlib import Path
 from typing import Annotated
 
+import duckdb
 import typer
 
+from nivesh_adapters import status_service
 from nivesh_agents.runtime import run_command, safe_error
+from nivesh_cli.brief import brief_app
 from nivesh_cli.common import metered_run, profile_of, settings_of, user_errors
+from nivesh_cli.deliver import deliver_app
 from nivesh_cli.engine import engine_app
 from nivesh_cli.holdings import holdings_app
 from nivesh_cli.ideas import ideas_app
 from nivesh_cli.market import market_app, master_app
 from nivesh_cli.mf import mf_app
+from nivesh_cli.research import research_app
 from nivesh_cli.review import review_app
 from nivesh_cli.thesis import thesis_app
 from nivesh_cli.universe import universe_app
@@ -18,9 +23,11 @@ from nivesh_cli.watch import watch_app
 from nivesh_core.config import Settings, load_settings
 from nivesh_core.cost import gate, month_to_date
 from nivesh_core.db import init_stores
+from nivesh_core.db.duck import open_duck
 from nivesh_core.db.sqlite import open_sqlite
 from nivesh_core.egress import check_egress
 from nivesh_core.errors import ConfigError
+from nivesh_core.paths import find_run_dir
 from nivesh_core.profile import Profile, load_profile
 from nivesh_core.secrets import secret_exists, set_secret
 from nivesh_core.timeutil import utcnow
@@ -34,6 +41,9 @@ app.add_typer(secrets_app, name="secrets")
 app.registered_commands.extend(holdings_app.registered_commands)  # login, sync, ingest, ...
 app.registered_commands.extend(engine_app.registered_commands)  # ta, fa, valuation, ...
 app.registered_commands.extend(ideas_app.registered_commands)  # ideas
+app.registered_commands.extend(research_app.registered_commands)  # research
+app.registered_commands.extend(brief_app.registered_commands)  # brief
+app.registered_commands.extend(deliver_app.registered_commands)  # deliver
 app.add_typer(master_app, name="master")
 app.add_typer(market_app, name="market")
 app.add_typer(mf_app, name="mf")
@@ -148,8 +158,8 @@ def replay(ctx: typer.Context, run_id: int) -> None:
     """Re-run a recorded run's engine steps and require identical results."""
     from nivesh_core.replay import replay_run
 
-    rdir = Path(_settings(ctx).data_dir) / "runs" / str(run_id)
-    if not (rdir / "trace.jsonl").is_file():
+    rdir = find_run_dir(Path(_settings(ctx).data_dir), run_id)
+    if rdir is None or not (rdir / "trace.jsonl").is_file():
         typer.echo(f"error: no trace for run {run_id}", err=True)
         raise typer.Exit(1)
     result = replay_run(rdir)
@@ -210,10 +220,25 @@ def status(ctx: typer.Context) -> None:
         init_stores(data_dir)
     conn = open_sqlite(data_dir / "nivesh.sqlite")
     try:
-        spent = month_to_date(conn, utcnow())
+        now = utcnow()
+        spent = month_to_date(conn, now)
+        duck = _read_duck(data_dir)
+        try:
+            health = status_service.health(conn, duck, _settings(ctx), data_dir, now)
+        finally:
+            if duck is not None:
+                duck.close()
     finally:
         conn.close()
     cap = _profile(ctx).monthly_cost_cap
     pct = f"{spent / cap * 100:.0f}%" if cap else "n/a"
     state = "disabled" if not cap else gate(spent, cap, "deep", False).message or "ok"
     typer.echo(f"month-to-date: {spent:.2f} INR\ncap: {cap:.2f} INR ({pct})\ngate: {state}")
+    typer.echo("\n".join(health))
+
+
+def _read_duck(data_dir: Path) -> duckdb.DuckDBPyConnection | None:
+    try:
+        return open_duck(data_dir / "nivesh.duckdb", read_only=True)
+    except (duckdb.ConnectionException, duckdb.IOException):
+        return None

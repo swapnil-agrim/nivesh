@@ -16,6 +16,7 @@ from nivesh_cli.main import app
 from nivesh_core.pii_scan import scan_paths, scan_text
 from tests.agents import committee_fx as fx
 from tests.ideas_fx import ASOF, hold, seed_ideas_store, with_benchmarks
+from tests.run_paths import run_path
 
 ROOT = Path(__file__).resolve().parents[2]
 runner = CliRunner()
@@ -37,7 +38,7 @@ def test_ideas_run_over_synthetic_universe_leaves_no_pii_in_run_dir_trace_ledger
     watch = call("watch", "add", "AAA", "90", "100")
     ran = call("ideas", "india", "3")
     assert watch.exit_code == 0 and ran.exit_code == 0, ran.output
-    files = [p for p in (data / "runs" / "1").rglob("*") if p.is_file()]
+    files = [p for p in run_path(data, 1).rglob("*") if p.is_file()]
     assert any(p.name == "trace.jsonl" for p in files) and any(
         p.name == "snapshot.json" for p in files
     )

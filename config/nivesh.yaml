@@ -230,3 +230,23 @@ ideas:
   held: label                   # label held names as ADD candidates, or "exclude" them
   default_preset: lt-quality-value
   max_runs: 16                  # committee runs per command across markets
+
+# E10 reports: the citation check holds every number in a report to evidence from the run, within
+# half a unit of its last displayed digit; this caps how many displayed decimals count (example
+# only, equal to the built-in default).
+report:
+  max_tolerance_digits: 6
+
+# E10 delivery: nothing is sent unless a channel is listed. Every connection detail is a ref:NAME
+# reference to a stored value (never the value itself); the lines below are examples only.
+delivery:
+  channels: []                  # any of: telegram, slack, email
+  # telegram_bot: ref:TELEGRAM_BOT
+  # telegram_chat: ref:TELEGRAM_CHAT
+  # slack_hook: ref:SLACK_HOOK
+  # smtp_host: ref:SMTP_HOST
+  # smtp_user: ref:SMTP_USER
+  # smtp_auth: ref:SMTP_AUTH
+  # mail_to: ref:MAIL_TO
+  max_attempts: 3
+  timeout_s: 10

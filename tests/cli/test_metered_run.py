@@ -1,5 +1,6 @@
 """The shared run lifecycle (gate, run row, trace) used by `nivesh run` and the review commands."""
 
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from nivesh_core.db import init_stores
 from nivesh_core.profile import Profile, load_profile
 from nivesh_core.timeutil import to_iso, utcnow
 from nivesh_core.trace import read_trace
+from tests.run_paths import run_col, run_path
 
 Env = tuple[list[str], Path]
 
@@ -49,8 +51,9 @@ def test_metered_run_records_a_run_row_and_finishes_it_ok_or_error(cli_env: Env)
     with pytest.raises(RuntimeError), metered_run(settings, profile, "probe", "quick", force=False):
         raise RuntimeError("boom")
     got = rows(cli_env[1])
-    assert got[0] == ("probe", "ok", "quick", "claude-test", 0, 0.0, "runs/1", "v1")
-    assert got[1][:3] == ("probe", "error", "quick") and got[1][6] == "runs/2"
+    assert got[0][:6] == ("probe", "ok", "quick", "claude-test", 0, 0.0) and got[0][7] == "v1"
+    assert re.fullmatch(run_col(1), got[0][6])
+    assert got[1][:3] == ("probe", "error", "quick") and re.fullmatch(run_col(2), got[1][6])
 
 
 def test_metered_run_respects_the_cost_gate_and_exits_1_when_blocked(
@@ -81,10 +84,10 @@ def test_run_command_behaviour_is_unchanged(cli_env: Env, monkeypatch: pytest.Mo
     r = CliRunner().invoke(app, [*cli_env[0], "run", "ping"])
     assert r.exit_code == 0 and "pong" in r.output
     ((command, status, tier, model, tok, cost, rdir, ver),) = rows(cli_env[1])
-    assert (command, status, tier, model, tok, rdir) == ("ping", "ok", "quick", "claude-test",
-                                                          100, "runs/1")  # fmt: skip
+    assert (command, status, tier, model, tok) == ("ping", "ok", "quick", "claude-test", 100)
+    assert re.fullmatch(run_col(1), rdir)
     assert cost > 0 and ver is not None and len(ver) == 12
-    recs = read_trace(cli_env[1] / "runs" / "1" / "trace.jsonl")
+    recs = read_trace(run_path(cli_env[1], 1) / "trace.jsonl")
     assert [x["type"] for x in recs] == [
         "start", "assistant_text", "tool_call", "tool_result", "result",
     ]  # fmt: skip

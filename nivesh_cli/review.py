@@ -33,6 +33,7 @@ from nivesh_cli.common import metered_run, profile_of, settings_of, user_errors
 from nivesh_cli.engine import AsJson, AsOf, _as_of, reader
 from nivesh_cli.thesis import held_securities, store_reader
 from nivesh_core.errors import NiveshError
+from nivesh_core.paths import find_run_dir
 from nivesh_core.thesis_store import active_theses
 from nivesh_engine.rebalance import RebalancePlan, propose_moves
 from nivesh_engine.tax_lots import LotPick, LotTaxLine, cheapest_lots, tax_lots
@@ -192,8 +193,9 @@ def review_flags(data_dir: Path, run_id: int) -> tuple[dict[int, str], list[str]
     `run_id`. Failed markers and files that do not validate are skipped with a note."""
     if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1:
         raise NiveshError("--review-run must be a positive run number")
-    outputs = data_dir / "runs" / str(run_id) / "outputs"  # built from the integer only
-    files = sorted(outputs.glob("*_holding_review_*.json")) if outputs.is_dir() else []
+    found = find_run_dir(data_dir, run_id)  # built from the integer only
+    outputs = None if found is None else found / "outputs"
+    files = sorted(outputs.glob("*_holding_review_*.json")) if outputs and outputs.is_dir() else []
     if not files:
         raise NiveshError(f"run {run_id} has no saved holding reviews")
     flags: dict[int, str] = {}

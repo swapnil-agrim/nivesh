@@ -1,5 +1,6 @@
 """`nivesh thesis list | show` over a synthetic store (no PII, no network, no model)."""
 
+import re
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -17,6 +18,7 @@ from nivesh_core.thesis_store import save_thesis
 from tests.cli.test_engine_cli import snapshot
 from tests.core.test_thesis import thesis
 from tests.holdings_fx import holding
+from tests.run_paths import run_col, run_path
 
 D = Decimal
 runner = CliRunner()
@@ -236,9 +238,10 @@ def test_onboard_failed_draft_is_reported_and_the_loop_continues(
 def test_onboard_run_row_and_trace_record_cost_and_prompt_versions(env: Env, onboard: Any) -> None:
     runner.invoke(app, [*env[0], "thesis", "onboard"], input="s\n")
     ((command, status, tier, cost, ver, rdir),) = run_rows(env)
-    assert (command, status, tier, rdir) == ("thesis onboard", "ok", "quick", "runs/1")
+    assert (command, status, tier) == ("thesis onboard", "ok", "quick")
+    assert re.fullmatch(run_col(1), rdir)
     assert cost > 0 and ver == "thesis_draft:v1"
-    recs = read_trace(env[1] / "runs" / "1" / "trace.jsonl")
+    recs = read_trace(run_path(env[1], 1) / "trace.jsonl")
     starts = {x["agent"]: x["prompt_version"] for x in recs if x["type"] == "agent_start"}
     assert starts == {"fundamental": "v1", "technical": "v1", "news": "v1", "thesis_draft": "v1"}
     assert recs[-1]["type"] == "result" and recs[-1]["cost_inr"] == cost

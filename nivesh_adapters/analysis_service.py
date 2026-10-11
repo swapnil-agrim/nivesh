@@ -3,6 +3,7 @@ server. One function per engine tool: each takes open connections, the settings 
 tools) the profile, never a CLI context, and returns plain data. Nothing is fetched or written.
 """
 
+import re
 import sqlite3
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, fields, is_dataclass
@@ -28,7 +29,7 @@ from nivesh_core.errors import NiveshError
 from nivesh_core.mf_models import FundMeta
 from nivesh_core.mf_store import get_fund_holdings, latest_fund_meta, months_stored
 from nivesh_core.profile import Profile
-from nivesh_core.security_master import SecurityMaster, SecurityRow
+from nivesh_core.security_master import Lookup, SecurityMaster, SecurityRow
 from nivesh_engine.committee_rules import RiskFacts
 from nivesh_engine.metrics import Bundles
 from nivesh_engine.mf_overlap import (
@@ -81,16 +82,41 @@ def plain(obj: object, number: Number = _exact) -> Any:
     return str(obj)
 
 
+_PREFIX = re.compile(r"^(?P<tag>[A-Za-z]+):(?P<rest>.+)$")
+_PREFIXES = {"NSE": ("IN", "NSE"), "US": ("US", None)}  # tag -> (market, exchange)
+
+
+def _prefixed(query: str) -> tuple[str, str | None, str | None]:
+    """(query, market, exchange) once an `NSE:`/`US:` tag is read; `id:<n>` is left alone."""
+    m = _PREFIX.match(query.strip())
+    if m is None or m["tag"].lower() == "id":
+        return query, None, None
+    tag = m["tag"].upper()
+    if tag not in _PREFIXES:
+        raise NiveshError(f"unknown prefix {m['tag']!r}; use NSE:SYMBOL or US:SYMBOL")
+    return (m["rest"].strip(), *_PREFIXES[tag])
+
+
 def resolve_security(sql: sqlite3.Connection, query: str) -> SecurityRow:
-    """One security for an ISIN/symbol/name, else an error listing up to 5 candidates."""
+    """One security for an ISIN/symbol/name, else an error listing up to 5 candidates.
+    `NSE:SYMBOL` picks the Indian NSE listing and `US:SYMBOL` the US one."""
+    text, market, exchange = _prefixed(query)
     master = SecurityMaster(sql)
-    found = master.lookup(query)
+    found = master.lookup(text, market)
+    cands = [c for c in found.candidates if exchange is None or c.exchange == exchange]
+    if exchange is None:
+        sid = found.security_id
+    else:  # an exact symbol/ISIN hit narrowed to the named exchange
+        exact = found.matched_by in ("symbol", "isin", "id")
+        sid = cands[0].security_id if exact and len(cands) == 1 else None
+    found = Lookup(sid, found.matched_by, cands)
     row = master.get(found.security_id) if found.security_id is not None else None
     if row is not None:
         return row
-    if found.candidates:
-        names = ", ".join(f"{c.symbol} ({c.exchange})" for c in found.candidates[:5])
-        raise NiveshError(f"{query!r} is ambiguous; candidates: {names}")
+    if cands:
+        names = ", ".join(f"{c.symbol} ({c.exchange})" for c in cands[:5])
+        hint = "; prefix the ticker with NSE: or US: to pick a listing" if market is None else ""
+        raise NiveshError(f"{query!r} is ambiguous; candidates: {names}{hint}")
     raise NiveshError(f"no security matches {query!r}; run `nivesh master build` first")
 
 

@@ -10,6 +10,7 @@ the top n flagged as reported. Output is an example for the owner to judge, not 
 
 import asyncio
 import json
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Any
@@ -21,21 +22,33 @@ from nivesh_adapters.ideas_service import (
     IdeaFacts,
     MarketIdeas,
     gather_facts,
+    idea_report,
     ledger_rows,
     load_preset,
     render_idea,
     shortlist_for,
 )
+from nivesh_adapters.report import save_report
+from nivesh_adapters.report_check import NEEDS_REVIEW, finalize
 from nivesh_adapters.universe_service import MARKETS
 from nivesh_agents.committee import CommitteeInputs, CommitteeResult, prepare_inputs, run_committee
 from nivesh_agents.prompts import load_prompt
-from nivesh_cli.common import config_dir_of, metered_run, profile_of, settings_of, user_errors
+from nivesh_cli.common import (
+    Metered,
+    config_dir_of,
+    metered_run,
+    profile_of,
+    settings_of,
+    user_errors,
+)
+from nivesh_cli.deliver import DeliverFlag, after_save
 from nivesh_cli.engine import AsJson, _as_of, reader
 from nivesh_core.config import Settings
 from nivesh_core.db.sqlite import open_sqlite
 from nivesh_core.errors import NiveshError
 from nivesh_core.ledger import record_call
 from nivesh_core.profile import Profile
+from nivesh_core.timeutil import utcnow
 from nivesh_engine.shortlist import IdeaVerdict, Ranking, ShortRow, rank_ideas
 
 ideas_app = typer.Typer()
@@ -56,6 +69,7 @@ def ideas_cmd(
     preset: Annotated[str | None, typer.Argument(help="Preset name from config/screens.")] = None,
     force: Annotated[bool, typer.Option("--force", help="Allow a deep run near the cap.")] = False,
     as_json: AsJson = False,
+    deliver: DeliverFlag = False,
 ) -> None:
     """Screen, shortlist, run the committee on the shortlist, and report the top n ideas."""
     settings, profile = settings_of(ctx), profile_of(ctx)
@@ -94,10 +108,36 @@ def ideas_cmd(
             _report_none(found, name, day, notes, as_json)
             return
         typer.echo(f"ideas: {len(picks)} deep committee runs (estimate)", err=True)
-        result, run_id, results = _run(settings, profile, inputs, force)
-        ranking = rank_ideas(
-            [_idea(v, facts, cards) for v in result.verdicts], count
-        )  # ranked by conviction, then composite
+        held: dict[str, Ranking] = {}
+        labels = {r.security_id: r.label for _, r in picks}
+
+        def after(res: CommitteeResult, m: Metered) -> None:
+            # ranked by conviction, then composite; the report is built, checked and saved
+            # while the run is open so a failed check can lower its status
+            held["ranking"] = rank = rank_ideas(
+                [_idea(v, facts, cards) for v in res.verdicts], count
+            )
+            try:
+                report, shown = idea_report(
+                    run_at=utcnow(), run_id=m.run_id, day=day, preset=name, count=count,
+                    verdicts=res.verdicts, ranking=rank, facts=facts, labels=labels, cards=cards,
+                    notes=notes,
+                )  # fmt: skip
+                report = finalize(
+                    report, shown, m.run_dir, max_digits=settings.report.max_tolerance_digits,
+                    metered=m,
+                )  # fmt: skip
+                save_report(m.run_dir, report, shown, m.tracer)
+            except Exception as e:  # the committee already ran: keep its ledger rows
+                m.status = NEEDS_REVIEW
+                typer.echo(f"warning: the report step failed ({type(e).__name__})", err=True)
+                return
+            if report.banner:
+                typer.echo(f"warning: {report.banner}; see {m.run_dir}/report.md", err=True)
+            after_save(settings, m, deliver)
+
+        result, run_id, results = _run(settings, profile, inputs, force, after)
+        ranking = held["ranking"]
         rows = ledger_rows(
             result.verdicts, run_id=run_id, run_dir=results, facts=facts,
             preset_of={r.security_id: name for _, r in picks}, reported_ids=ranking.reported_ids,
@@ -133,6 +173,7 @@ def _idea(v: Any, facts: IdeaFacts, cards: dict[int, Any]) -> IdeaVerdict:
 
 def _run(
     settings: Settings, profile: Profile, inputs: CommitteeInputs, force: bool,
+    after: Callable[[CommitteeResult, Metered], None],
 ) -> tuple[CommitteeResult, int, Path]:  # fmt: skip
     cfg = settings.agents
     with metered_run(settings, profile, "ideas", "deep", force=force) as m:
@@ -152,6 +193,11 @@ def _run(
             )  # fmt: skip
         )
         m.status = "ok"
+        try:
+            after(result, m)
+        except Exception:
+            m.status = "error"
+            raise
         return result, m.run_id, m.run_dir
 
 

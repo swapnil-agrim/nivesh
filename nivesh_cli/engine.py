@@ -37,6 +37,12 @@ from nivesh_engine.screen import RuleSet, parse_rules, screen
 engine_app = typer.Typer()
 
 AsOf = Annotated[str | None, typer.Option("--as-of", help="Date, YYYY-MM-DD (default: today).")]
+Note = Annotated[
+    bool, typer.Option("--note", help="Save a checked engine note (no model call) and print it.")
+]
+Analyst = Annotated[
+    bool, typer.Option("--analyst", help="With --note: add one quick analyst call (spends).")
+]
 AsJson = Annotated[bool, typer.Option("--json", help="Print exact decimal strings as JSON.")]
 Symbol = Annotated[str, typer.Argument(help="ISIN, symbol or company name.")]
 NOT_STORED = "no market data store found in {path}; run `nivesh init` and ingest prices first"
@@ -146,9 +152,20 @@ def emit(command: str, subject: str | None, as_of: date, result: object, as_json
 # ---- the single-security commands ---------------------------------------------------------------
 @engine_app.command("ta")
 def ta_cmd(
-    ctx: typer.Context, security: Symbol, as_of: AsOf = None, as_json: AsJson = False
+    ctx: typer.Context,
+    security: Symbol,
+    as_of: AsOf = None,
+    as_json: AsJson = False,
+    note: Note = False,
+    analyst: Analyst = False,
 ) -> None:
     """Technical indicators, support and resistance, and the setup, from stored daily bars."""
+    if analyst and not note:
+        raise typer.BadParameter("--analyst needs --note", param_hint="--analyst")
+    if note:
+        from nivesh_cli.note import run_note
+
+        return run_note(ctx, "ta", security, as_of, as_json, analyst)
     with user_errors(), reader(ctx) as r:
         day = _as_of(as_of)
         rep = svc.ta_report(r.duck, r.sql, r.settings, security, day)
@@ -157,9 +174,20 @@ def ta_cmd(
 
 @engine_app.command("fa")
 def fa_cmd(
-    ctx: typer.Context, security: Symbol, as_of: AsOf = None, as_json: AsJson = False
+    ctx: typer.Context,
+    security: Symbol,
+    as_of: AsOf = None,
+    as_json: AsJson = False,
+    note: Note = False,
+    analyst: Analyst = False,
 ) -> None:
     """Growth, profitability, balance sheet and cash quality, using filings up to the date."""
+    if analyst and not note:
+        raise typer.BadParameter("--analyst needs --note", param_hint="--analyst")
+    if note:
+        from nivesh_cli.note import run_note
+
+        return run_note(ctx, "fa", security, as_of, as_json, analyst)
     with user_errors(), reader(ctx) as r:
         day = _as_of(as_of)
         rep = svc.fa_report(r.duck, r.sql, r.settings, security, day)

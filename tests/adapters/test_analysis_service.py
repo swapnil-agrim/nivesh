@@ -341,3 +341,52 @@ def test_service_functions_take_connections_and_settings_not_cli_context() -> No
         ann = " ".join(str(p.annotation) for p in inspect.signature(fn).parameters.values())
         assert "typer" not in ann and "Context" not in ann, name
     assert "typer" not in inspect.getsource(svc) and "nivesh_cli" not in inspect.getsource(svc)
+
+
+def _dual_master(tmp_path: Path) -> sqlite3.Connection:
+    data = tmp_path / "d"
+    init_stores(data)
+    sql = open_sqlite(data / "nivesh.sqlite")
+    build_master(
+        sql,
+        [
+            mrow("DUP", name="Dup India Limited"),
+            mrow("DUP", "NASDAQ", name="Dup Inc", market="US", currency="USD"),
+            mrow("DUP", "BSE", name="Dup India Limited"),
+        ],
+        [],
+    )
+    return sql
+
+
+def test_prefix_nse_selects_the_nse_listing_of_a_dual_symbol(tmp_path: Path) -> None:
+    sql = _dual_master(tmp_path)
+    try:
+        with pytest.raises(NiveshError, match=r"ambiguous.*NSE: or US:"):
+            svc.resolve_security(sql, "DUP")
+        got = svc.resolve_security(sql, "NSE:DUP")
+        assert (got.market, got.exchange) == ("IN", "NSE")
+    finally:
+        sql.close()
+
+
+def test_prefix_us_selects_the_us_listing_and_is_case_insensitive(tmp_path: Path) -> None:
+    sql = _dual_master(tmp_path)
+    try:
+        for q in ("US:DUP", "us:dup", " Us:DUP "):
+            assert svc.resolve_security(sql, q).market == "US"
+    finally:
+        sql.close()
+
+
+def test_unknown_prefix_is_an_error_and_id_form_is_not_a_prefix(tmp_path: Path) -> None:
+    sql = _dual_master(tmp_path)
+    try:
+        with pytest.raises(NiveshError, match="unknown prefix.*NSE:SYMBOL or US:SYMBOL"):
+            svc.resolve_security(sql, "LSE:DUP")
+        row = svc.resolve_security(sql, "NSE:DUP")
+        assert svc.resolve_security(sql, f"id:{row.id}").id == row.id
+        with pytest.raises(NiveshError, match="no security matches"):
+            svc.resolve_security(sql, "US:NOPE")
+    finally:
+        sql.close()
