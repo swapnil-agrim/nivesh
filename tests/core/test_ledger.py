@@ -6,7 +6,8 @@ import pytest
 from pydantic import ValidationError
 
 from nivesh_core.db import MIGRATIONS, migrate
-from nivesh_core.ledger import LedgerEntry, calls_for_run, latest_call, record_call
+from nivesh_core.errors import NiveshError
+from nivesh_core.ledger import LedgerEntry, calls_for_run, latest_call, record_call, record_calls
 from nivesh_core.redact import is_sensitive_key
 
 D = Decimal
@@ -150,3 +151,41 @@ def test_field_names_avoid_redaction_parts() -> None:
     c = db()
     cols = [r[1] for r in c.execute("PRAGMA table_info(ledger_entry)")]
     assert not [n for n in [*cols, *LedgerEntry.model_fields] if is_sensitive_key(n)]
+
+
+def test_record_calls_is_all_or_none() -> None:
+    c = db()
+    with pytest.raises(sqlite3.IntegrityError):
+        record_calls(c, [entry(), entry(security_id=2), entry(security_id=99)], NOW)
+    assert c.execute("SELECT count(*) FROM ledger_entry").fetchone() == (0,)
+    assert not c.in_transaction
+    ids = record_calls(c, [entry(), entry(security_id=2)], NOW)
+    assert ids == [1, 2] and [r.id for r in calls_for_run(c, 1)] == ids
+    assert record_calls(c, [], NOW) == []
+
+
+def test_record_calls_refuses_inside_an_open_transaction() -> None:
+    c = db()
+    c.execute("BEGIN")
+    with pytest.raises(NiveshError, match="open transaction"):
+        record_calls(c, [entry()], NOW)
+    c.execute("ROLLBACK")
+
+
+def test_issue_fields_roundtrip_and_default() -> None:
+    c = db()
+    record_call(c, entry(), NOW)
+    record_call(
+        c,
+        entry(as_of=date(2026, 10, 9), price_date=date(2026, 10, 8), source="holding_review"),
+        NOW,
+    )
+    a, b = calls_for_run(c, 1)
+    assert (a.as_of, a.price_date, a.source) == (None, None, "verdict")
+    assert (b.as_of, b.price_date, b.source) == (
+        date(2026, 10, 9),
+        date(2026, 10, 8),
+        "holding_review",
+    )
+    with pytest.raises(ValidationError):
+        entry(source="other")

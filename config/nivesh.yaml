@@ -195,11 +195,11 @@ agents:
 
 # E8 portfolio review: owner-set parameters, example only and equal to the built-in defaults
 # (nothing here is advice). Section 15.6 trigger thresholds, thesis review interval, rebalance band
-# (percentage points per asset class) and the per-proposal turnover cap.
+# (percentage points per asset class) and the calendar-year turnover cap.
 review:
   default_review_days: 90
   band_pp: 5
-  turnover_limit_pct: 30        # per proposal; annual turnover is not tracked yet
+  turnover_limit_pct: 30        # per calendar year; sales you recorded with `nivesh decide` count against it
   valuation_percentile_min: 95
   valuation_metric: pe
   valuation_history_years: 5
@@ -250,3 +250,23 @@ delivery:
   # mail_to: ref:MAIL_TO
   max_attempts: 3
   timeout_s: 10
+
+# E12 ledger scoring: owner-set parameters, example only and equal to the built-in defaults
+# (nothing here is advice). Scores are split-adjusted price returns against a price index, not a
+# total-return index: price index, not TRI. cost_pct is the assumed round-trip cost in percent.
+# benchmarks maps a market to an index symbol; empty means analysis.ta.benchmarks is used.
+scoring:
+  horizons_weeks: [1, 4, 13, 26, 52]
+  cost_pct: {IN: 0.25, US: 0.10}
+  benchmarks: {}
+  stale_days: 7                 # a leg whose last bar is older than this before the target is insufficient
+  min_bucket: 20                # scorecard buckets with fewer scored calls say "not enough data"
+  calibration_min: 40           # scored calls needed for a calibration report
+  resamples: 1000
+  resample_seed: 20260101       # integer start state of the bootstrap; must not be 0
+  primary_horizon_weeks: 13     # horizon used by every scorecard dimension except horizon itself
+
+# E12 evaluation: model id -> last date of its training data. A historical evaluation is refused
+# unless it starts strictly after the cutoff; with no entry for a model it is always refused.
+evaluation:
+  model_cutoffs: {}

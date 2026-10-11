@@ -1,0 +1,582 @@
+# Golden set (ST-12.6): model-free cases, each with the properties it must show. Decimals and
+# dates are quoted strings so no float enters. A case marked safety guards a PID safety property:
+# if one fails, the release is blocked whatever the overall pass rate. No case calls a model.
+cases:
+- id: score_buy_beats_benchmark
+  kind: score_call
+  safety: false
+  historical: false
+  given:
+    verdict: BUY
+    as_of: '2026-01-05'
+    price_date: '2026-01-05'
+    horizon_weeks: 1
+    cost_pct: '0.25'
+    today: '2027-01-01'
+    stale_days: 7
+    security:
+    - ['2026-01-05', '100']
+    - ['2026-01-12', '112']
+    benchmark:
+    - ['2026-01-05', '200']
+    - ['2026-01-12', '210']
+  expect: {status: scored, ret: '12.0000', benchmark_ret: '5.0000', excess: '7.0000', call_excess: '6.7500',
+    hit: true, end_date: '2026-01-12'}
+- id: score_buy_cost_flips_the_sign
+  kind: score_call
+  safety: false
+  historical: false
+  given:
+    verdict: BUY
+    as_of: '2026-01-05'
+    price_date: '2026-01-05'
+    horizon_weeks: 1
+    cost_pct: '0.25'
+    today: '2027-01-01'
+    stale_days: 7
+    security:
+    - ['2026-01-05', '100']
+    - ['2026-01-12', '105.1']
+    benchmark:
+    - ['2026-01-05', '200']
+    - ['2026-01-12', '210']
+  expect: {status: scored, excess: '0.1000', call_excess: '-0.1500', hit: false}
+- id: score_accumulate_uses_the_buy_rule
+  kind: score_call
+  safety: false
+  historical: false
+  given:
+    verdict: ACCUMULATE
+    as_of: '2026-01-05'
+    price_date: '2026-01-05'
+    horizon_weeks: 1
+    cost_pct: '0.25'
+    today: '2027-01-01'
+    stale_days: 7
+    security:
+    - ['2026-01-05', '100']
+    - ['2026-01-12', '112']
+    benchmark:
+    - ['2026-01-05', '200']
+    - ['2026-01-12', '210']
+  expect: {call_excess: '6.7500', hit: true}
+- id: score_sell_hit_when_security_trails
+  kind: score_call
+  safety: false
+  historical: false
+  given:
+    verdict: SELL
+    as_of: '2026-01-05'
+    price_date: '2026-01-05'
+    horizon_weeks: 1
+    cost_pct: '0.25'
+    today: '2027-01-01'
+    stale_days: 7
+    security:
+    - ['2026-01-05', '100']
+    - ['2026-01-12', '97']
+    benchmark:
+    - ['2026-01-05', '200']
+    - ['2026-01-12', '208']
+  expect: {ret: '-3.0000', benchmark_ret: '4.0000', call_excess: '7.0000', hit: true}
+- id: score_sell_miss_when_security_leads
+  kind: score_call
+  safety: false
+  historical: false
+  given:
+    verdict: SELL
+    as_of: '2026-01-05'
+    price_date: '2026-01-05'
+    horizon_weeks: 1
+    cost_pct: '0.25'
+    today: '2027-01-01'
+    stale_days: 7
+    security:
+    - ['2026-01-05', '100']
+    - ['2026-01-12', '104']
+    benchmark:
+    - ['2026-01-05', '200']
+    - ['2026-01-12', '204']
+  expect: {excess: '2.0000', call_excess: '-2.0000', hit: false}
+- id: score_trim_uses_the_do_nothing_rule
+  kind: score_call
+  safety: false
+  historical: false
+  given:
+    verdict: TRIM
+    as_of: '2026-01-05'
+    price_date: '2026-01-05'
+    horizon_weeks: 1
+    cost_pct: '0.25'
+    today: '2027-01-01'
+    stale_days: 7
+    security:
+    - ['2026-01-05', '100']
+    - ['2026-01-12', '97']
+    benchmark:
+    - ['2026-01-05', '200']
+    - ['2026-01-12', '208']
+  expect: {call_excess: '7.0000', hit: true}
+- id: score_hold_is_scored_without_a_hit
+  kind: score_call
+  safety: false
+  historical: false
+  given:
+    verdict: HOLD
+    as_of: '2026-01-05'
+    price_date: '2026-01-05'
+    horizon_weeks: 1
+    cost_pct: '0.25'
+    today: '2027-01-01'
+    stale_days: 7
+    security:
+    - ['2026-01-05', '100']
+    - ['2026-01-12', '112']
+    benchmark:
+    - ['2026-01-05', '200']
+    - ['2026-01-12', '210']
+  expect: {status: scored, excess: '7.0000', call_excess: null, hit: null}
+- id: score_insufficient_verdict_is_not_scored
+  kind: score_call
+  safety: false
+  historical: false
+  given:
+    verdict: INSUFFICIENT_DATA
+    as_of: '2026-01-05'
+    price_date: '2026-01-05'
+    horizon_weeks: 1
+    cost_pct: '0.25'
+    today: '2027-01-01'
+    stale_days: 7
+    security:
+    - ['2026-01-05', '100']
+    - ['2026-01-12', '112']
+    benchmark:
+    - ['2026-01-05', '200']
+    - ['2026-01-12', '210']
+  expect: {status: insufficient_data, ret: null}
+- id: score_pending_until_both_series_reach_the_target
+  kind: score_call
+  safety: false
+  historical: false
+  given:
+    verdict: BUY
+    as_of: '2026-01-05'
+    price_date: '2026-01-05'
+    horizon_weeks: 1
+    cost_pct: '0.25'
+    today: '2026-01-13'
+    stale_days: 7
+    security:
+    - ['2026-01-05', '100']
+    - ['2026-01-09', '110']
+    benchmark:
+    - ['2026-01-05', '200']
+    - ['2026-01-12', '210']
+  expect: {status: pending}
+- id: score_entry_uses_price_date_not_the_issue_day_bar
+  kind: score_call
+  safety: true
+  historical: false
+  given:
+    verdict: BUY
+    as_of: '2026-01-05'
+    price_date: '2026-01-02'
+    horizon_weeks: 1
+    cost_pct: '0.25'
+    today: '2027-01-01'
+    stale_days: 7
+    security:
+    - ['2026-01-02', '100']
+    - ['2026-01-05', '150']
+    - ['2026-01-12', '120']
+    benchmark:
+    - ['2026-01-02', '200']
+    - ['2026-01-05', '200']
+    - ['2026-01-12', '220']
+  expect: {ret: '20.0000', benchmark_ret: '10.0000', call_excess: '9.7500', hit: true}
+- id: score_stale_end_bar_is_insufficient
+  kind: score_call
+  safety: false
+  historical: false
+  given:
+    verdict: BUY
+    as_of: '2026-01-05'
+    price_date: '2026-01-05'
+    horizon_weeks: 1
+    cost_pct: '0.25'
+    today: '2027-01-01'
+    stale_days: 6
+    security:
+    - ['2026-01-05', '100']
+    - ['2026-01-30', '120']
+    benchmark:
+    - ['2026-01-05', '200']
+    - ['2026-01-30', '210']
+  expect: {status: insufficient_data}
+- id: scorecard_19_calls_is_not_enough
+  kind: scorecard_bucket
+  safety: false
+  historical: false
+  given:
+    dimension: verdict
+    key: BUY
+    calls:
+    - {verdict: BUY, count: 19, excess: '1'}
+  expect: {calls: 19, scored: 19, enough: false, hit_pct: '100.00'}
+- id: scorecard_20_calls_is_enough
+  kind: scorecard_bucket
+  safety: false
+  historical: false
+  given:
+    dimension: verdict
+    key: BUY
+    calls:
+    - {verdict: BUY, count: 20, excess: '1'}
+  expect: {calls: 20, enough: true}
+- id: scorecard_counts_calls_not_horizon_rows
+  kind: scorecard_bucket
+  safety: false
+  historical: false
+  given:
+    dimension: verdict
+    key: BUY
+    calls:
+    - count: 19
+      horizons: [1, 4, 13, 26, 52]
+      excess: '1'
+  expect: {calls: 19, scored: 19, enough: false}
+- id: scorecard_one_sign_for_buy_and_sell
+  kind: scorecard_bucket
+  safety: false
+  historical: false
+  given:
+    dimension: market
+    key: IN
+    calls:
+    - {verdict: BUY, count: 15, excess: '2'}
+    - {verdict: SELL, count: 5, excess: '4'}
+    - {verdict: BUY, count: 5, excess: '-6'}
+  expect: {calls: 25, scored: 25, hit_pct: '80.00', mean_excess: '0.8000', median_excess: '2.0000', worst: '-6',
+    enough: true}
+- id: scorecard_hold_counts_but_has_no_hit_or_excess
+  kind: scorecard_bucket
+  safety: false
+  historical: false
+  given:
+    dimension: market
+    key: IN
+    min_bucket: 1
+    calls:
+    - {verdict: HOLD, count: 3}
+    - {verdict: BUY, count: 2, excess: '3'}
+  expect: {calls: 5, scored: 5, hit_pct: '100.00', mean_excess: '3.0000'}
+- id: scorecard_insufficient_calls_counted_not_scored
+  kind: scorecard_bucket
+  safety: false
+  historical: false
+  given:
+    dimension: verdict
+    key: INSUFFICIENT_DATA
+    calls:
+    - {verdict: INSUFFICIENT_DATA, count: 4, status: insufficient_data}
+    - {count: 1, excess: '1'}
+  expect: {calls: 4, scored: 0, hit_pct: null, enough: false}
+- id: scorecard_empty_input_has_no_bucket
+  kind: scorecard_bucket
+  safety: false
+  historical: false
+  given:
+    dimension: verdict
+    key: BUY
+    calls: []
+  expect: {found: false}
+- id: scorecard_splits_system_and_acted_calls
+  kind: scorecard_bucket
+  safety: false
+  historical: false
+  given:
+    dimension: system_vs_acted
+    key: acted
+    min_bucket: 1
+    calls:
+    - {count: 2, excess: '5', acted: true}
+    - {count: 3, excess: '-1'}
+  expect: {calls: 2, mean_excess: '5.0000', enough: true}
+- id: calibration_39_calls_is_not_enough
+  kind: calibration_verdict
+  safety: false
+  historical: false
+  given:
+    groups:
+      high: [15, 4]
+      medium: [10, 10]
+  expect: {enough: false, n: 39, verdict: not enough data}
+- id: calibration_8_calls_is_not_enough
+  kind: calibration_verdict
+  safety: false
+  historical: false
+  given:
+    groups:
+      high: [5, 3]
+  expect: {enough: false, n: 8}
+- id: calibration_40_calls_gives_a_report
+  kind: calibration_verdict
+  safety: false
+  historical: false
+  given:
+    groups:
+      high: [20, 0]
+      low: [10, 10]
+  expect: {enough: true, n: 40, verdict: monotonic}
+- id: calibration_falling_hit_rates_are_monotonic
+  kind: calibration_verdict
+  safety: false
+  historical: false
+  given:
+    groups:
+      high: [80, 20]
+      medium: [60, 40]
+      low: [40, 60]
+  expect: {verdict: monotonic}
+- id: calibration_rising_hit_rates_are_not_monotonic
+  kind: calibration_verdict
+  safety: false
+  historical: false
+  given:
+    groups:
+      high: [40, 60]
+      medium: [60, 40]
+      low: [80, 20]
+  expect: {verdict: not monotonic}
+- id: calibration_overlapping_intervals_are_inconclusive
+  kind: calibration_verdict
+  safety: false
+  historical: false
+  given:
+    groups:
+      high: [8, 6]
+      medium: [7, 7]
+      low: [6, 8]
+  expect: {verdict: inconclusive}
+- id: lookahead_start_after_cutoff_is_allowed
+  kind: lookahead
+  safety: true
+  historical: false
+  given:
+    eval_start: '2025-03-02'
+    model_id: model-x
+    cutoffs: &id001 {model-x: '2025-03-01'}
+  expect: {outcome: allowed}
+- id: lookahead_start_on_cutoff_is_refused
+  kind: lookahead
+  safety: true
+  historical: false
+  given:
+    eval_start: '2025-03-01'
+    model_id: model-x
+    cutoffs: *id001
+  expect: {outcome: refused}
+- id: lookahead_start_before_cutoff_is_refused
+  kind: lookahead
+  safety: true
+  historical: false
+  given:
+    eval_start: '2024-01-01'
+    model_id: model-x
+    cutoffs: *id001
+  expect: {outcome: refused}
+- id: lookahead_unknown_model_is_refused
+  kind: lookahead
+  safety: true
+  historical: false
+  given:
+    eval_start: '2030-01-01'
+    model_id: model-y
+    cutoffs: *id001
+  expect: {outcome: refused}
+- id: lookahead_empty_cutoff_map_is_refused
+  kind: lookahead
+  safety: true
+  historical: false
+  given:
+    eval_start: '2030-01-01'
+    model_id: model-x
+    cutoffs: {}
+  expect: {outcome: refused}
+- id: committee_veto_lowers_buy_to_hold
+  kind: committee_cap
+  safety: true
+  historical: false
+  given: {proposed: BUY, veto: true}
+  expect: {verdict: HOLD, vetoed_by_risk: true}
+- id: committee_hold_cap_lowers_accumulate_to_hold
+  kind: committee_cap
+  safety: true
+  historical: false
+  given: {proposed: ACCUMULATE, card_cap: HOLD}
+  expect: {verdict: HOLD}
+- id: committee_hard_red_flag_lowers_buy_to_hold
+  kind: committee_cap
+  safety: true
+  historical: false
+  given: {proposed: BUY, hard_flag: true}
+  expect: {verdict: HOLD}
+- id: committee_insufficient_band_forces_insufficient_data
+  kind: committee_cap
+  safety: true
+  historical: false
+  given: {proposed: BUY, card_band: insufficient_data}
+  expect: {verdict: INSUFFICIENT_DATA}
+- id: committee_coverage_below_minimum_forces_insufficient_data
+  kind: committee_cap
+  safety: true
+  historical: false
+  given: {proposed: BUY, coverage: '69', min_coverage: '70'}
+  expect: {verdict: INSUFFICIENT_DATA}
+- id: committee_coverage_at_minimum_keeps_the_verdict
+  kind: committee_cap
+  safety: false
+  historical: false
+  given: {proposed: BUY, coverage: '70', min_coverage: '70'}
+  expect: {verdict: BUY}
+- id: committee_never_raises_a_hold
+  kind: committee_cap
+  safety: true
+  historical: false
+  given: {proposed: HOLD, veto: true}
+  expect: {verdict: HOLD}
+- id: committee_excluded_security_is_vetoed
+  kind: committee_veto
+  safety: true
+  historical: false
+  given: {excluded: true}
+  expect: {veto: true, reasons: excluded_by_profile}
+- id: committee_slow_to_trade_is_vetoed_when_capped
+  kind: committee_veto
+  safety: false
+  historical: false
+  given: {days_to_trade: '9', max_days_to_trade: '5'}
+  expect: {veto: true, reasons: days_to_trade_over_limit}
+- id: committee_unknown_days_to_trade_is_not_a_veto
+  kind: committee_veto
+  safety: false
+  historical: false
+  given: {max_days_to_trade: '5'}
+  expect: {veto: false, reasons: ''}
+- id: momentum_alone_never_reaches_the_top_band
+  kind: momentum_only
+  safety: true
+  historical: false
+  given: {momentum: '99'}
+  expect: {top_band: false}
+- id: momentum_alone_gets_no_credit_without_fundamentals
+  kind: momentum_only
+  safety: true
+  historical: false
+  given: {momentum: '50'}
+  expect: {top_band: false}
+- id: write_name_place_order
+  kind: write_name
+  safety: true
+  historical: false
+  given: {name: place_order}
+  expect: {write: true}
+- id: write_name_sellall
+  kind: write_name
+  safety: true
+  historical: false
+  given: {name: sellAll}
+  expect: {write: true}
+- id: write_name_get_quote_eod
+  kind: write_name
+  safety: true
+  historical: false
+  given: {name: get_quote_eod}
+  expect: {write: false}
+- id: write_name_reorder_levels
+  kind: write_name
+  safety: true
+  historical: false
+  given: {name: reorder_levels}
+  expect: {write: false}
+- id: citation_matching_number_passes
+  kind: citation_check
+  safety: false
+  historical: false
+  given:
+    text: Return on capital was 18.40 percent
+    evidence: ['18.40']
+  expect: {clean: true, unmatched: 0}
+- id: citation_unsupported_number_is_flagged
+  kind: citation_check
+  safety: true
+  historical: false
+  given:
+    text: Target price is 250.00
+    evidence: ['100']
+  expect: {clean: false, unmatched: 1}
+- id: citation_rounding_within_half_a_unit_passes
+  kind: citation_check
+  safety: false
+  historical: false
+  given:
+    text: Margin is 12.3%
+    evidence: ['12.34']
+  expect: {clean: true}
+- id: citation_rounding_outside_half_a_unit_is_flagged
+  kind: citation_check
+  safety: true
+  historical: false
+  given:
+    text: Margin is 12.3%
+    evidence: ['12.4']
+  expect: {clean: false, unmatched: 1}
+- id: citation_known_date_passes
+  kind: citation_check
+  safety: false
+  historical: false
+  given:
+    text: Data as of 2026-01-02
+    evidence_days: ['2026-01-02']
+  expect: {clean: true}
+- id: citation_unknown_date_is_flagged
+  kind: citation_check
+  safety: true
+  historical: false
+  given:
+    text: Data as of 2026-01-02
+    evidence_days: ['2026-01-03']
+  expect: {clean: false, unmatched: 1}
+- id: ledger_entry_update_is_refused
+  kind: ledger_append_only
+  safety: true
+  historical: false
+  given: {table: ledger_entry, op: update, insert: 'INSERT INTO ledger_entry (run_id, security_id, verdict,
+      horizon, conviction, invalidation, review_date, input_hash, prompt_versions, model_versions, reported,
+      created_at) VALUES (1, 1, ''BUY'', ''positional_1_6m'', ''low'', ''[]'', ''d'', ''h'', ''{}'', ''{}'',
+      1, ''t'')'}
+  expect: {refused: true}
+- id: ledger_entry_delete_is_refused
+  kind: ledger_append_only
+  safety: true
+  historical: false
+  given: {table: ledger_entry, op: delete, insert: 'INSERT INTO ledger_entry (run_id, security_id, verdict,
+      horizon, conviction, invalidation, review_date, input_hash, prompt_versions, model_versions, reported,
+      created_at) VALUES (1, 1, ''BUY'', ''positional_1_6m'', ''low'', ''[]'', ''d'', ''h'', ''{}'', ''{}'',
+      1, ''t'')'}
+  expect: {refused: true}
+- id: ledger_decision_update_is_refused
+  kind: ledger_append_only
+  safety: true
+  historical: false
+  given: {table: ledger_decision, op: update, insert: 'INSERT INTO ledger_decision (entry_id, decision,
+      on_date, decided_at) VALUES (1, ''acted'', ''d'', ''t'')'}
+  expect: {refused: true}
+- id: ledger_score_delete_is_refused
+  kind: ledger_append_only
+  safety: true
+  historical: false
+  given: {table: ledger_score, op: delete, insert: 'INSERT INTO ledger_score (entry_id, horizon_weeks,
+      status, basis, scored_at) VALUES (1, 4, ''scored'', ''b'', ''t'')'}
+  expect: {refused: true}

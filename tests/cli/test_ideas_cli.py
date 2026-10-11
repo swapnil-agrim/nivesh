@@ -185,6 +185,7 @@ def test_every_committee_verdict_recorded_in_the_ledger_with_reported_flag_for_t
     assert len(top) == 2 and reported == top
     assert {x.verdict for x in rows} >= {"BUY", "INSUFFICIENT_DATA"}
     assert all(x.preset == "lt-quality-value" and x.run_id == 1 for x in rows)
+    assert all(x.as_of == ASOF and x.price_date == ASOF and x.source == "verdict" for x in rows)
 
 
 def test_ledger_row_has_run_id_input_hash_prompt_and_model_versions_and_last_close(
@@ -211,15 +212,7 @@ def test_ledger_row_has_run_id_input_hash_prompt_and_model_versions_and_last_clo
                 (row.security_id,),
             ).fetchone()
             assert row.last_close == D(str(last[0]))
-            bench = (
-                duck.execute(
-                    "SELECT close FROM price_bar b JOIN (SELECT 1) ON 1=1 WHERE security_id = "
-                    "(SELECT 0) LIMIT 1"
-                ).fetchone()
-                if False
-                else None
-            )
-            assert bench is None and row.benchmark_level is not None  # BENCHIN configured
+            assert row.benchmark_level is not None  # BENCHIN configured
     finally:
         duck.close()
     assert len({r.input_hash for r in rows}) == len(rows)
@@ -384,3 +377,20 @@ def test_report_step_failure_keeps_the_ledger_rows_and_flags_needs_review(
     c = sqlite3.connect(env[1] / "nivesh.sqlite")
     assert c.execute("SELECT status FROM run").fetchall() == [("needs_review",)]
     c.close()
+
+
+def test_a_failing_ledger_row_leaves_the_ledger_empty_and_shows_an_error(
+    env: Env, fake: FakeSDK, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import nivesh_cli.ideas as cideas
+
+    real = cideas.ledger_rows
+
+    def with_bad_second(*a: Any, **k: Any) -> list[Any]:
+        rows = real(*a, **k)
+        return [rows[0], rows[1].model_copy(update={"security_id": 99999}), *rows[2:]]
+
+    monkeypatch.setattr(cideas, "ledger_rows", with_bad_second)
+    r = call(env, "ideas", "india", "2")
+    assert r.exit_code == 1 and "nothing was recorded" in r.output
+    assert ledger(env) == []

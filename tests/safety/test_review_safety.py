@@ -107,7 +107,8 @@ def test_review_commands_other_than_onboard_never_write_the_store(
     ):  # fmt: skip
         assert _call(env, *args).exit_code == 0, args
     assert snapshot(env[1]) == before
-    # `review holdings` records only its run row (and the run directory): no thesis or holding
+    # `review holdings` records its run row and ledger rows (and the run directory): no thesis
+    # or holding
     review = fx.review(as_of=fx.AS_OF.isoformat())
     monkeypatch.setattr(
         runtime, "query",
@@ -121,4 +122,4 @@ def test_review_commands_other_than_onboard_never_write_the_store(
     assert r.exit_code == 0, r.output
     after = snapshot(env[1])
     changed = {k for k in after if after[k] != before.get(k)}
-    assert changed == {"sqlite.run"}, changed
+    assert changed == {"sqlite.run", "sqlite.ledger_entry"}, changed

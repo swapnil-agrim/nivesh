@@ -11,9 +11,16 @@ def pos(key: str, cls: str, value: int | str, flag: str | None = None,
     return Position(key, key.upper(), cls, D(value), flag, None if tax is None else D(tax))
 
 
-def plan(positions: list[Position], cash: int = 0, cap: int = 100, band: int = 5) -> RebalancePlan:
+def plan(
+    positions: list[Position], cash: int = 0, cap: int = 100, band: int = 5, ytd: int = 0
+) -> RebalancePlan:
     return propose_moves(
-        TARGETS, positions, band_pp=D(band), new_cash=D(cash), turnover_limit_pct=D(cap)
+        TARGETS,
+        positions,
+        band_pp=D(band),
+        new_cash=D(cash),
+        turnover_limit_pct=D(cap),
+        ytd_sold_inr=D(ytd),
     )
 
 
@@ -99,7 +106,7 @@ def test_turnover_cap_stops_with_a_partial_move_and_notes_what_stays_out_of_band
     assert p.turnover_pct == D("20.00") and not p.within_band
     cap = [n for n in p.notes if n.startswith("turnover cap 20% reached; still out of band:")]
     assert len(cap) == 1 and "equity" in cap[0]
-    assert "per-proposal cap; annual turnover not tracked yet" in p.notes
+    assert "no acted sales recorded this year" in p.notes
 
 
 def test_pro_forma_sums_to_100_and_matches_moves() -> None:
@@ -148,3 +155,25 @@ def test_class_without_a_target_is_left_alone_with_a_note() -> None:
     assert all(m.key != "u" for m in p.moves)
     assert any("unclassified" in n and "no target" in n for n in p.notes)
     assert {x.asset_class: x.target_pct for x in p.pro_forma}["unclassified"] == 0
+
+
+def test_year_to_date_sales_use_up_the_annual_cap() -> None:
+    base = plan(exit_trim_book(), cap=30)  # cap 300 of 1000; the plan wants 250
+    assert base.turnover_pct == D("25.00") and "no acted sales recorded this year" in base.notes
+    same = plan(exit_trim_book(), cap=30, ytd=0)
+    assert same == base  # with nothing sold the plan is unchanged
+    half = plan(exit_trim_book(), cap=30, ytd=200)  # 100 left of the 300 cap
+    assert (
+        half.turnover_pct == D("10.00")
+        and sum(m.amount_inr for m in half.moves if m.kind == "reduce") == 100
+    )
+    assert "year-to-date sold 20.00% of the 30% cap (from the decision ledger)" in half.notes
+    full = plan(exit_trim_book(), cap=30, ytd=300)
+    assert reduces(full) == [] and full.turnover_pct == 0
+    assert any(n.startswith("turnover cap 30% reached; still out of band") for n in full.notes)
+
+
+def test_year_to_date_above_the_cap_clamps_at_zero() -> None:
+    over = plan(exit_trim_book(), cap=30, ytd=900)
+    assert reduces(over) == [] and over.turnover_pct == 0 and not over.within_band
+    assert "year-to-date sold 90.00% of the 30% cap (from the decision ledger)" in over.notes

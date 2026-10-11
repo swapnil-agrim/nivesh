@@ -13,6 +13,7 @@ from nivesh_core.delivery_config import DeliverySettings
 from nivesh_core.errors import ConfigError
 from nivesh_core.report_config import ReportSettings
 from nivesh_core.review_config import ReviewSettings
+from nivesh_core.scoring_config import EvaluationSettings, ScoringSettings
 from nivesh_core.secrets import REF_RE
 from nivesh_core.universe_config import IdeasSettings, UniverseSettings
 from nivesh_core.yamlio import read_mapping, validate
@@ -318,6 +319,8 @@ class Settings(BaseModel):
     ideas: IdeasSettings = IdeasSettings()
     report: ReportSettings = ReportSettings()
     delivery: DeliverySettings = DeliverySettings()
+    scoring: ScoringSettings = ScoringSettings()
+    evaluation: EvaluationSettings = EvaluationSettings()
 
     @field_validator("registered_ip")
     @classmethod

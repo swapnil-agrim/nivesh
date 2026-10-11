@@ -34,11 +34,11 @@ def test_migration_0007_on_a_0006_store_keeps_holdings_theses_and_adds_tables(
         assert c.execute(f"SELECT count(*) FROM {t}").fetchone() == (0,)  # noqa: S608
 
 
-def test_fresh_store_is_at_version_7(tmp_path: Path) -> None:
+def test_fresh_store_is_at_latest_version(tmp_path: Path) -> None:
     init_stores(tmp_path / "d")
     c = sqlite3.connect(tmp_path / "d" / "nivesh.sqlite")
     assert c.execute("SELECT max(version) FROM schema_version").fetchone()[0] >= 7
-    assert sorted(p.name for p in SQLITE.glob("*.sql"))[-1] == "0007_ideas.sql"
+    assert sorted(p.name for p in SQLITE.glob("*.sql"))[-1] == "0008_scoring.sql"
 
 
 def fresh() -> sqlite3.Connection:

@@ -8,7 +8,7 @@ import json
 import re
 import sqlite3
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -139,6 +139,7 @@ class IdeaFacts:
     last_close: dict[int, Decimal]
     benchmark: dict[int, tuple[Decimal | None, str | None]]
     names: dict[int, SecurityRow]
+    closing_date: dict[int, date] = field(default_factory=dict)
 
 
 def gather_facts(
@@ -163,7 +164,8 @@ def gather_facts(
             benchmark[i] = (None, f"no stored bars for benchmark {ref.symbol}")
         else:
             benchmark[i] = (series[-1].close, None)
-    return IdeaFacts(closes, benchmark, rows)
+    dates = {i: b[-1].date for i, b in bars.items() if b}
+    return IdeaFacts(closes, benchmark, rows, dates)
 
 
 def _verdict_hash(snapshot: dict[str, Any], security_id: int) -> str:
@@ -174,12 +176,13 @@ def _verdict_hash(snapshot: dict[str, Any], security_id: int) -> str:
 
 def ledger_rows(
     verdicts: Sequence[CommitteeVerdict], *, run_id: int, run_dir: Path, facts: IdeaFacts,
-    preset_of: dict[int, str], reported_ids: frozenset[int],
+    day: date, preset_of: dict[int, str], reported_ids: frozenset[int],
 ) -> list[LedgerEntry]:  # fmt: skip
     """One ledger row per committee verdict. Where each field comes from: the verdict itself
     (verdict, horizon, conviction, weight, zone, invalidation, review date); `facts` (last close
     and benchmark level, read before the run); the run's saved snapshot (prompt and model
-    versions, and a hash of that security's engine outputs); `reported_ids` and `preset_of`."""
+    versions, and a hash of that security's engine outputs); `reported_ids` and `preset_of`. `day`
+    is the run day (`as_of`); `price_date` is the date of the bar `last_close` came from."""
     snapshot = json.loads((run_dir / "snapshot.json").read_text())
     out: list[LedgerEntry] = []
     for v in verdicts:
@@ -206,6 +209,8 @@ def ledger_rows(
                 model_versions=dict(snapshot["models"]),
                 reported=v.security_id in reported_ids,
                 preset=preset_of.get(v.security_id),
+                as_of=day,
+                price_date=facts.closing_date.get(v.security_id),
             )  # fmt: skip
         )
     return out

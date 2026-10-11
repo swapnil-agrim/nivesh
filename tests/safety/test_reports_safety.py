@@ -125,6 +125,6 @@ def test_no_new_migration_and_no_new_dependency_file_content() -> None:
     names = sorted(
         p.name for p in (ROOT / "nivesh_core" / "db" / "migrations" / "sqlite").iterdir()
     )
-    assert names[-1] == "0007_ideas.sql"
+    assert names[-1] == "0008_scoring.sql"
     deps = (ROOT / "pyproject.toml").read_text()
     assert "smtp" not in deps.lower() and "telegram" not in deps.lower()
