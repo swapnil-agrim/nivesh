@@ -114,8 +114,9 @@ def test_decide_errors_exit_one_and_store_nothing(env: Env) -> None:
 
 
 def test_decide_has_no_option_that_edits_an_old_row(env: Env) -> None:
-    r = call(env, "decide", "--help")
-    assert "--corrects" in r.output and "--update" not in r.output and "--edit" not in r.output
+    cmd = typer.main.get_command(app).commands["decide"]  # type: ignore[attr-defined]
+    opts = {o for p in cmd.params for o in p.opts}  # registered names, not rich-wrapped help text
+    assert "--corrects" in opts and not opts & {"--update", "--edit"}
 
 
 def load_line(fx: Fx) -> None:
