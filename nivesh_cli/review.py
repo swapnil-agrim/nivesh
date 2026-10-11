@@ -7,40 +7,31 @@ stores, and then asks the reviewer agent once per holding with a thesis (a meter
 floors each action. `rebalance` only proposes moves.
 """
 
-import asyncio
 import json
-import sqlite3
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
 
-from nivesh_adapters.analysis_data import load_bars
-from nivesh_adapters.analysis_service import plain, resolve_security, xray_report
+from nivesh_adapters.analysis_service import plain, resolve_security
 from nivesh_adapters.review_service import (
     TAX_LABEL,
     holdings_of,
     lot_basis,
     rebalance_inputs,
-    review_facts,
+    run_holding_reviews,
 )
-from nivesh_adapters.score_service import holding_review_entry, ytd_sold_inr
-from nivesh_agents.analysts import Target
-from nivesh_agents.context import RunCtx
-from nivesh_agents.holding_review import ReviewItem, review_all
-from nivesh_agents.prompts import load_prompt
+from nivesh_adapters.run_support import BudgetRefused
+from nivesh_adapters.score_service import ytd_sold_inr
 from nivesh_agents.schemas import HoldingReview
-from nivesh_agents.store import RunStore
-from nivesh_cli.common import metered_run, profile_of, settings_of, user_errors
+from nivesh_cli.common import profile_of, settings_of, user_errors
 from nivesh_cli.engine import AsJson, AsOf, _as_of, reader
-from nivesh_cli.thesis import held_securities, store_reader
-from nivesh_core.db.sqlite import open_sqlite
+from nivesh_cli.thesis import store_reader
 from nivesh_core.errors import NiveshError
-from nivesh_core.ledger import record_calls
 from nivesh_core.paths import find_run_dir
-from nivesh_core.thesis_store import active_theses
+from nivesh_core.timeutil import utcnow
 from nivesh_engine.rebalance import RebalancePlan, propose_moves
 from nivesh_engine.tax_lots import LotPick, LotTaxLine, cheapest_lots, tax_lots
 
@@ -129,6 +120,10 @@ def tax_cmd(
             typer.echo(line_text)
 
 
+def _warn(message: str) -> None:
+    typer.echo(f"warning: {message}", err=True)
+
+
 def _review_lines(symbol: str, r: HoldingReview) -> list[str]:
     out = [f"{symbol}  {r.action}  {r.confidence}  thesis {r.thesis_status}"]
     out += [f"  reason {x.code}: {x.text}" for x in r.reasons]
@@ -139,51 +134,6 @@ def _review_lines(symbol: str, r: HoldingReview) -> list[str]:
     return out
 
 
-_PRICE_WINDOW = 10  # days back from the review day to find the last bar
-
-
-def _record_reviews(
-    settings: Any,
-    items: list[ReviewItem],
-    reviews: list[HoldingReview],
-    run_id: int,
-    day: date,
-    price_dates: dict[int, date],
-    version: Any,
-) -> None:
-    """Append one ledger row per review that is a call. A ledger failure never hides the
-    reviews already computed: it is a warning and the exit status stays 0."""
-    if not items:
-        return
-    cfg = settings.agents
-    model = getattr(cfg.models, cfg.tiers["holding_review"])
-    rows = [
-        e
-        for it, r in zip(items, reviews, strict=True)
-        if (
-            e := holding_review_entry(
-                r,
-                review_day=day,
-                price_date=price_dates.get(r.security_id),
-                thesis_horizon=it.thesis.horizon,
-                thesis_review_date=it.thesis.review_date,
-                run_id=run_id,
-                prompt_versions={"holding_review": str(version)},
-                model_versions={"holding_review": str(model)},
-            )  # fmt: skip
-        )
-        is not None
-    ]
-    try:
-        sql = open_sqlite(Path(settings.data_dir) / "nivesh.sqlite")
-        try:
-            record_calls(sql, rows)
-        finally:
-            sql.close()
-    except (sqlite3.Error, OSError) as e:
-        typer.echo(f"warning: the ledger rows were not saved ({type(e).__name__})", err=True)
-
-
 @review_app.command("holdings")
 def holdings_cmd(
     ctx: typer.Context,
@@ -192,56 +142,29 @@ def holdings_cmd(
 ) -> None:
     """HOLD, ADD, TRIM, EXIT or REVIEW per equity holding with a thesis, with reasons."""
     settings, profile = settings_of(ctx), profile_of(ctx)
-    with user_errors(), reader(ctx) as rd:
-        day = _as_of(None)
-        held = held_securities(rd.sql)
-        if only is not None:
-            sid = resolve_security(rd.sql, only).id
-            held = [h for h in held if h.security_id == sid]
-        theses = active_theses(rd.sql)
-        missing = [h.symbol for h in held if h.security_id not in theses]
-        xray = None
-        items: list[ReviewItem] = []
-        price_dates: dict[int, date] = {}
-        for h in held:
-            if h.security_id not in theses:
-                continue
-            if xray is None:
-                xray = xray_report(rd.duck, rd.sql, settings, profile, day)["xray"]
-            holding = holdings_of(rd.sql, h.security_id)[0]
-            facts = review_facts(rd.duck, rd.sql, settings, profile, holding, day, xray=xray)
-            target = Target(h.security_id, h.symbol, h.name or h.symbol, h.asset_class, h.market)
-            items.append(ReviewItem(target, theses[h.security_id], facts))
-        if items:  # date of the last bar on or before the review day (the ledger's price_date)
-            ids = [i.target.security_id for i in items]
-            bars = load_bars(rd.duck, ids, start=day - timedelta(days=_PRICE_WINDOW), end=day)
-            price_dates = {i: b[-1].date for i, b in bars.items() if b}
-    reviews: list[HoldingReview] = []
-    run_id = 0
-    if items:  # the stores are closed before any agent call (the engine server opens them)
-        cfg = settings.agents
-        with metered_run(settings, profile, "review holdings", "quick", force=False) as m:
-            version = load_prompt("holding_review", pins=cfg.prompt_pins).version
-            m.tracer.start("review holdings", f"holding_review:v{version}")
-            run = RunCtx(cfg, m.tracer, day, "quick", settings.prices, settings.usd_inr, m.env)
-            store = RunStore(m.run_dir, m.tracer)
-            reviews = asyncio.run(review_all(run, items, settings.review, store))
-            m.tracer.finish_run(getattr(cfg.models, cfg.tiers["holding_review"]))
-            m.status = "ok"
-            run_id = m.run_id
-        _record_reviews(settings, items, reviews, run_id, day, price_dates, version)
+    with user_errors():
+        try:
+            out = run_holding_reviews(
+                settings, profile, _as_of(None), only, clock=lambda: utcnow(), warn=_warn
+            )
+        except BudgetRefused as e:
+            _warn(str(e))
+            raise typer.Exit(1) from None
+    if out.warning:
+        _warn(out.warning)
+    missing = list(out.missing)
     if as_json:
-        out = {
-            "command": "review holdings", "as_of": day.isoformat(), "without_thesis": missing,
-            "reviews": [r.model_dump(mode="json") for r in reviews],
+        payload = {
+            "command": "review holdings", "as_of": out.day.isoformat(), "without_thesis": missing,
+            "reviews": [r.model_dump(mode="json") for r in out.reviews],
         }  # fmt: skip
-        typer.echo(json.dumps(out, sort_keys=True))
+        typer.echo(json.dumps(payload, sort_keys=True))
         return
-    typer.echo(f"review holdings as of {day}")
-    for it, r in zip(items, reviews, strict=True):
+    typer.echo(f"review holdings as of {out.day}")
+    for it, r in zip(out.items, out.reviews, strict=True):
         for line in _review_lines(it.target.symbol, r):
             typer.echo(line)
-    if not items:
+    if not out.items:
         typer.echo("nothing to review: no equity or ETF holding with an active thesis")
     if missing:
         typer.echo(f"without a thesis: {', '.join(missing)} (run `nivesh thesis onboard`)")

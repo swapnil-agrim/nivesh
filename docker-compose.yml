@@ -1,5 +1,6 @@
-# Single-service deployment. A scheduler service (nightly backup, daily jobs) is deferred to E11;
-# until then run `nivesh backup` from the host cron (docs/deploy/vm.md).
+# Single-service deployment. A scheduler service (nightly backup, daily jobs) is still deferred
+# (#21); the tick `nivesh schedule run` and its host examples are in docs/deploy/schedule.md, and
+# `nivesh backup` can run from the host cron (docs/deploy/vm.md).
 services:
   nivesh:
     build: .

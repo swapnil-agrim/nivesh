@@ -48,3 +48,6 @@ Set `backup.target` and `backup.recipient` (an age public key) in config. Keep t
     0 2 * * * cd /opt/nivesh && docker compose run --rm nivesh backup
 
 Restore: `nivesh restore <archive> --identity <identity-file> --data-dir <new-dir>`.
+
+The scheduler's weekly `backup` job (see `docs/deploy/schedule.md`) is an alternative to this cron
+line.

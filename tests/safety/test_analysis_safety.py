@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ENGINE = (
     "dmath metric bars ta levels regime setups fa valuation redflags xray risk metrics screen "
     "scoring ledger_score scorecard calibration lookahead committee_rules tax_lots review_rules "
-    "rebalance universe shortlist money citations"
+    "rebalance universe shortlist money citations schedule alert_rules"
 ).split()
 MODULES = [
     *(ROOT / "nivesh_engine" / f"{n}.py" for n in ENGINE),

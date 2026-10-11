@@ -16,17 +16,15 @@ from typing import Annotated, Any
 import typer
 
 from nivesh_adapters.analysis_service import resolve_security
+from nivesh_adapters.holdings_service import held_securities
 from nivesh_agents.context import RunCtx
 from nivesh_agents.prompts import load_prompt
 from nivesh_agents.schemas import ThesisDraft
 from nivesh_agents.store import RunStore
 from nivesh_agents.thesis_agent import (
-    THESIS_CLASSES,
     Choice,
-    Held,
     apply_choice,
     draft_all,
-    merge_held,
     onboard_targets,
 )
 from nivesh_cli.common import metered_run, profile_of, settings_of, user_errors
@@ -34,34 +32,11 @@ from nivesh_cli.engine import AsOf, _as_of
 from nivesh_core.db import init_stores
 from nivesh_core.db.sqlite import open_sqlite
 from nivesh_core.errors import NiveshError
-from nivesh_core.holdings_store import latest_holdings
 from nivesh_core.thesis import KillCriterion, Thesis
 from nivesh_core.thesis_store import active_theses, active_thesis, save_thesis
 
 thesis_app = typer.Typer(no_args_is_help=True, help="Investment theses of equity holdings.")
 FUNDS_NOTE = "mutual funds are out of scope here (the fund doctor reviews them)"
-
-
-def held_securities(sql: sqlite3.Connection) -> list[Held]:
-    """Equity and ETF holdings merged per security, largest INR value first."""
-    rows: list[Held] = []
-    for h in latest_holdings(sql):
-        if h.asset_class not in THESIS_CLASSES:
-            continue
-        row = None
-        if h.isin:
-            row = sql.execute(
-                "SELECT id, name, market FROM security WHERE isin = ? "
-                "ORDER BY unresolved, id LIMIT 1",
-                (h.isin,),
-            ).fetchone()
-        if row is None:
-            row = sql.execute(
-                "SELECT id, name, market FROM security WHERE symbol = ? AND exchange = ?",
-                (h.symbol, h.exchange),
-            ).fetchone()
-        rows.append(Held(int(row[0]), h.symbol, h.asset_class, h.value_inr, row[1] or "", row[2]))
-    return merge_held(rows)
 
 
 @contextmanager

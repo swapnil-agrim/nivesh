@@ -250,7 +250,7 @@ def test_onboard_run_row_and_trace_record_cost_and_prompt_versions(env: Env, onb
 def test_held_securities_prefers_the_resolved_row_when_a_placeholder_shares_the_isin(
     tmp_path: Path,
 ) -> None:
-    from nivesh_cli.thesis import held_securities
+    from nivesh_adapters.holdings_service import held_securities
     from tests.adapters.test_review_service import placeholder_then_resolved
 
     rid = placeholder_then_resolved(tmp_path / "data")

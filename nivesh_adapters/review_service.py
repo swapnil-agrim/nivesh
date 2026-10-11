@@ -6,23 +6,40 @@ lots use `mf.tax`, and US lots use `tax.us_long_term_days` for the long-term fla
 not modelled). `Profile.tax_rates` is legacy and never read.
 """
 
+import asyncio
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
+from typing import Any
 
 import duckdb
 
-from nivesh_adapters.analysis_data import load_screen_inputs, load_xray_inputs
-from nivesh_adapters.analysis_service import xray_report
+from nivesh_adapters.analysis_data import load_bars, load_screen_inputs, load_xray_inputs
+from nivesh_adapters.analysis_service import resolve_security, xray_report
+from nivesh_adapters.holdings_service import held_securities
+from nivesh_adapters.run_support import metered_run
+from nivesh_adapters.score_service import holding_review_entry
+from nivesh_adapters.stores import open_read_stores
+from nivesh_agents.analysts import Target
+from nivesh_agents.context import RunCtx
+from nivesh_agents.holding_review import ReviewItem, review_all
+from nivesh_agents.prompts import load_prompt
+from nivesh_agents.schemas import HoldingReview
+from nivesh_agents.store import RunStore
 from nivesh_core.config import Settings
+from nivesh_core.db.sqlite import open_sqlite
 from nivesh_core.errors import NiveshError
 from nivesh_core.holdings import Holding
 from nivesh_core.holdings_store import latest_holdings, latest_lots, list_transactions
+from nivesh_core.ledger import record_calls
 from nivesh_core.profile import Profile
 from nivesh_core.review_config import ReviewSettings
 from nivesh_core.security_master import SecurityMaster, SecurityRow
+from nivesh_core.thesis_store import active_theses
+from nivesh_core.timeutil import utcnow
 from nivesh_engine.consolidate import Row
 from nivesh_engine.metrics import (
     REGISTRY,
@@ -252,3 +269,105 @@ def rebalance_inputs(
         rate = tax_per_inr(lot_basis(sql, r, settings), as_of)
         out.append(Position(r.key, r.name or r.symbol, cls, r.value_inr, flag, rate))
     return tuple(out), tuple(notes)
+
+
+# ---- the holding review run (ST-8.2), shared by the command and the scheduler -----------
+PRICE_WINDOW = 10  # days back from the review day to find the last bar
+
+
+@dataclass(frozen=True)
+class HoldingReviewsOutcome:
+    day: date
+    items: tuple[ReviewItem, ...]
+    reviews: tuple[HoldingReview, ...]
+    run_id: int  # 0 when nothing was reviewed
+    missing: tuple[str, ...]  # held symbols without an active thesis
+    warning: str | None  # the ledger rows were not saved, say
+
+
+def record_reviews(
+    settings: Settings, items: Sequence[ReviewItem], reviews: Sequence[HoldingReview],
+    run_id: int, day: date, price_dates: Mapping[int, date], version: Any,
+) -> str | None:  # fmt: skip
+    """Append one ledger row per review that is a call. A ledger failure never hides the
+    reviews already computed: it comes back as a warning text."""
+    if not items:
+        return None
+    cfg = settings.agents
+    model = getattr(cfg.models, cfg.tiers["holding_review"])
+    rows = [
+        e
+        for it, r in zip(items, reviews, strict=True)
+        if (
+            e := holding_review_entry(
+                r,
+                review_day=day,
+                price_date=price_dates.get(r.security_id),
+                thesis_horizon=it.thesis.horizon,
+                thesis_review_date=it.thesis.review_date,
+                run_id=run_id,
+                prompt_versions={"holding_review": str(version)},
+                model_versions={"holding_review": str(model)},
+            )  # fmt: skip
+        )
+        is not None
+    ]
+    try:
+        sql = open_sqlite(Path(settings.data_dir) / "nivesh.sqlite")
+        try:
+            record_calls(sql, rows)
+        finally:
+            sql.close()
+    except (sqlite3.Error, OSError) as e:
+        return f"the ledger rows were not saved ({type(e).__name__})"
+    return None
+
+
+def run_holding_reviews(
+    settings: Settings, profile: Profile, day: date, only: str | None = None, *,
+    clock: Callable[[], datetime] = utcnow, warn: Callable[[str], None] | None = None,
+    strict: bool = False,
+) -> HoldingReviewsOutcome:  # fmt: skip
+    """HOLD, ADD, TRIM, EXIT or REVIEW per held equity or ETF with an active thesis. Every fact
+    is computed first, read-only; the stores are closed before the reviewer is asked (a metered
+    run, tier quick). `strict` stops at the monthly cap (unattended use)."""
+    items: list[ReviewItem] = []
+    price_dates: dict[int, date] = {}
+    with open_read_stores(settings) as st:
+        held = held_securities(st.sql)
+        if only is not None:
+            sid = resolve_security(st.sql, only).id
+            held = [h for h in held if h.security_id == sid]
+        theses = active_theses(st.sql)
+        missing = tuple(h.symbol for h in held if h.security_id not in theses)
+        xray = None
+        for h in held:
+            if h.security_id not in theses:
+                continue
+            if xray is None:
+                xray = xray_report(st.duck, st.sql, settings, profile, day)["xray"]
+            holding = holdings_of(st.sql, h.security_id)[0]
+            facts = review_facts(st.duck, st.sql, settings, profile, holding, day, xray=xray)
+            target = Target(h.security_id, h.symbol, h.name or h.symbol, h.asset_class, h.market)
+            items.append(ReviewItem(target, theses[h.security_id], facts))
+        if items:  # date of the last bar on or before the review day (the ledger's price_date)
+            ids = [i.target.security_id for i in items]
+            bars = load_bars(st.duck, ids, start=day - timedelta(days=PRICE_WINDOW), end=day)
+            price_dates = {i: b[-1].date for i, b in bars.items() if b}
+    if not items:
+        return HoldingReviewsOutcome(day, (), (), 0, missing, None)
+    cfg = settings.agents
+    with metered_run(
+        settings, profile, "review holdings", "quick", force=False, clock=clock, warn=warn,
+        strict=strict,
+    ) as m:  # fmt: skip
+        version = load_prompt("holding_review", pins=cfg.prompt_pins).version
+        m.tracer.start("review holdings", f"holding_review:v{version}")
+        run = RunCtx(cfg, m.tracer, day, "quick", settings.prices, settings.usd_inr, m.env)
+        store = RunStore(m.run_dir, m.tracer)
+        reviews = asyncio.run(review_all(run, items, settings.review, store))
+        m.tracer.finish_run(getattr(cfg.models, cfg.tiers["holding_review"]))
+        m.status = "ok"
+        run_id = m.run_id
+    warning = record_reviews(settings, items, reviews, run_id, day, price_dates, version)
+    return HoldingReviewsOutcome(day, tuple(items), tuple(reviews), run_id, missing, warning)

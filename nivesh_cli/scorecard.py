@@ -13,7 +13,6 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Annotated
 
-import duckdb
 import typer
 
 from nivesh_adapters.report import save_report, to_json, to_markdown
@@ -26,11 +25,11 @@ from nivesh_adapters.score_service import (
     score_calls,
     scorecard_input,
 )
+from nivesh_adapters.stores import open_read_stores
 from nivesh_cli.common import plain_run, settings_of, user_errors
 from nivesh_cli.deliver import DeliverFlag, after_save
 from nivesh_cli.engine import AsJson, _as_of
 from nivesh_core.db import init_stores
-from nivesh_core.db.duck import open_duck
 from nivesh_core.db.sqlite import open_sqlite
 from nivesh_core.errors import NiveshError
 from nivesh_core.ledger import record_decision
@@ -98,21 +97,8 @@ def decide_cmd(
 def rescore_cmd(ctx: typer.Context, as_json: AsJson = False) -> None:
     """Score every ledger call that has become measurable and add the rows; nothing is edited."""
     settings = settings_of(ctx)
-    with user_errors():
-        data_dir = Path(settings.data_dir)
-        init_stores(data_dir)
-        try:
-            duck = open_duck(data_dir / "nivesh.duckdb", read_only=True)
-        except (duckdb.ConnectionException, duckdb.IOException):
-            raise NiveshError(
-                "the market database is in use by another process; retry shortly"
-            ) from None
-        sql = open_sqlite(data_dir / "nivesh.sqlite")  # its own read-write connection
-        try:
-            summary = score_calls(sql, duck, settings, _as_of(None))
-        finally:
-            sql.close()
-            duck.close()
+    with user_errors(), open_read_stores(settings, writable_sql=True) as st:
+        summary = score_calls(st.sql, st.duck, settings, _as_of(None))  # own read-write sqlite
     if as_json:
         typer.echo(json.dumps({**asdict(summary), "basis": BASIS_NOTE}, sort_keys=True))
         return

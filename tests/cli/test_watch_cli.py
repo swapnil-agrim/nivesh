@@ -185,6 +185,7 @@ def test_watch_list_opens_store_read_only(env: Env) -> None:
 def test_no_alert_or_notification_code_path() -> None:
     names = [p.name for p in (ROOT / "nivesh_core").glob("*.py")]
     names += [p.name for p in (ROOT / "nivesh_cli").glob("*.py")]
+    names = [n for n in names if n != "alerts.py"]  # the E11 alert store (ADR-0014)
     assert not [n for n in names if any(w in n for w in ("alert", "notif", "notify", "push"))]
     for module in ("nivesh_cli/watch.py", "nivesh_core/watch.py"):
         text = (ROOT / module).read_text().lower()

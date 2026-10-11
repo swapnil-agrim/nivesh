@@ -191,3 +191,42 @@ def test_service_never_writes_to_stores(data: Path) -> None:
     before = digest()
     facts(data)
     assert digest() == before
+
+
+def sections(inp: object) -> dict[str, tuple[str, ...]]:
+    return dict(inp.sections)  # type: ignore[attr-defined]
+
+
+def test_brief_states_the_snapshot_date_and_source(data: Path) -> None:
+    hold(data, 0)
+    snap = sections(facts(data))["Holdings snapshot"]
+    assert snap == ("Holdings snapshot as of 2026-01-01 (investright)",)
+
+
+def test_brief_without_a_snapshot_says_so(data: Path) -> None:
+    assert sections(facts(data))["Holdings snapshot"] == ("no holdings snapshot loaded",)
+
+
+def test_run_brief_follows_the_injected_clock_and_makes_a_plain_run(
+    data: Path, tmp_path: Path
+) -> None:
+    import sqlite3
+
+    from nivesh_adapters.brief_service import run_brief
+    from tests.analysis_fx import make_profile
+
+    hold(data, 0)
+    saved: list[int] = []
+    out = run_brief(
+        settings_of(data), make_profile(), "india", ASOF, clock=lambda: RUN_AT,
+        deliver_fn=lambda m: saved.append(m.run_id),
+    )  # fmt: skip
+    assert saved == [out.run_id] and out.run_dir == data / "runs" / "2026-01-02" / "1"
+    assert (out.run_dir / "report.md").is_file()
+    c = sqlite3.connect(data / "nivesh.sqlite")
+    assert c.execute("SELECT command, status, tier, started_at FROM run").fetchall() == [
+        ("brief", "ok", "none", RUN_AT.isoformat())
+    ]
+    assert "Holdings snapshot as of 2026-01-01" in (out.run_dir / "report.md").read_text()
+    with pytest.raises(NiveshError):
+        run_brief(settings_of(data), make_profile(), "mars", ASOF, clock=lambda: RUN_AT)

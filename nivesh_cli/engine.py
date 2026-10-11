@@ -21,13 +21,11 @@ from nivesh_adapters import analysis_service as svc
 from nivesh_adapters.analysis_data import load_screen_inputs
 from nivesh_adapters.analysis_service import plain
 from nivesh_adapters.ideas_service import load_preset
+from nivesh_adapters.stores import open_read_stores
 from nivesh_adapters.universe_service import MARKETS, resolve_universe
 from nivesh_cli.common import config_dir_of, settings_of, user_errors
 from nivesh_core.analysis_config import AnalysisSettings
 from nivesh_core.config import Settings
-from nivesh_core.db import init_stores
-from nivesh_core.db.duck import open_duck
-from nivesh_core.db.sqlite import open_sqlite
 from nivesh_core.errors import NiveshError
 from nivesh_core.profile import Profile
 from nivesh_core.timeutil import ist_date, utcnow
@@ -74,21 +72,8 @@ class Reader:
 def reader(ctx: typer.Context) -> Iterator[Reader]:
     """Both stores, opened for reading only."""
     settings = settings_of(ctx)
-    data_dir = Path(settings.data_dir)
-    init_stores(data_dir)
-    try:
-        duck = open_duck(data_dir / "nivesh.duckdb", read_only=True)
-    except (duckdb.ConnectionException, duckdb.IOException):
-        raise NiveshError(
-            "the market database is in use by another process; retry shortly"
-        ) from None
-    sql = open_sqlite(data_dir / "nivesh.sqlite")
-    sql.execute("PRAGMA query_only = ON")
-    try:
-        yield Reader(settings.analysis, settings, ctx.obj[1], sql, duck)
-    finally:
-        sql.close()
-        duck.close()
+    with open_read_stores(settings) as st:
+        yield Reader(settings.analysis, settings, ctx.obj[1], st.sql, st.duck)
 
 
 # ---- output -------------------------------------------------------------------------------------

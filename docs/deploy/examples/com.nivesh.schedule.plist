@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Example only: nothing is installed. A launchd agent that runs one scheduler tick every
+     5 minutes (300 seconds). Replace /opt/nivesh with your install directory. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nivesh.schedule</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/nivesh/.venv/bin/nivesh</string>
+    <string>schedule</string>
+    <string>run</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/opt/nivesh</string>
+  <key>StartInterval</key>
+  <integer>300</integer>
+</dict>
+</plist>
