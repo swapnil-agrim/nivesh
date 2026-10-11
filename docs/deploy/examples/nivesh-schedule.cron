@@ -1,0 +1,3 @@
+# Example only: nothing is installed. Copy the line into your own crontab to run the scheduler
+# tick every 5 minutes. Replace /opt/nivesh with your install directory.
+*/5 * * * * cd /opt/nivesh && nivesh schedule run >> /opt/nivesh/schedule.log 2>&1

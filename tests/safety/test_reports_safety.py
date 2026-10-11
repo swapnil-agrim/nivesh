@@ -20,6 +20,8 @@ NEW = [
     "nivesh_adapters/delivery.py", "nivesh_cli/brief.py", "nivesh_cli/note.py",
     "nivesh_cli/research.py", "nivesh_cli/deliver.py", "nivesh_core/report_config.py",
     "nivesh_core/delivery_config.py", "nivesh_engine/money.py", "nivesh_engine/citations.py",
+    "nivesh_adapters/run_support.py", "nivesh_adapters/holdings_service.py",
+    "nivesh_adapters/stores.py",
 ]  # fmt: skip
 EDITED = [  # scanned modules this goal edited: the scan runs on them again
     "nivesh_adapters/analysis_service.py", "nivesh_cli/engine.py", "nivesh_cli/ideas.py",
@@ -125,6 +127,6 @@ def test_no_new_migration_and_no_new_dependency_file_content() -> None:
     names = sorted(
         p.name for p in (ROOT / "nivesh_core" / "db" / "migrations" / "sqlite").iterdir()
     )
-    assert names[-1] == "0008_scoring.sql"
+    assert names[-1] == "0009_scheduler_alerts.sql"
     deps = (ROOT / "pyproject.toml").read_text()
     assert "smtp" not in deps.lower() and "telegram" not in deps.lower()

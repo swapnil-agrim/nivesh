@@ -1,0 +1,34 @@
+# E11 schedule of unattended jobs (ADR-0014). Times are IST wall-clock; stored instants are UTC.
+# One tick, `nivesh schedule run`, is called every 5 minutes by cron, systemd or launchd (see
+# docs/deploy/schedule.md; nothing is installed). A job runs once per (job, trading date).
+#   market:         IN (NSE calendar) | US (NYSE calendar) | none
+#   weekday:        0-6, Monday is 0; nth_weekday: 1 means only the first such weekday of a month
+#   day_offset:     1 runs the day after the session it covers (US monitors, after the close)
+#   grace_minutes:  later than this is stored and shown as LATE
+#   catchup_hours:  later than this is skipped as a missed window instead of run
+#   stale_minutes:  a job still running after this long is treated as crashed and reclaimed
+# brief_us: the computed instant (30 minutes before the NY open, DST by rule) wins over `at`.
+retries: 2
+backoff_s: [30, 120]
+us_lead_min: 30
+deliver_holdings: false      # true: send the weekly and monthly review summaries
+min_holidays_warn: 8         # `schedule status` warns when the NSE list has fewer dates
+mf_stale_days: 7
+alerts:
+  daily_cap: 8
+  dedupe_sessions: 5
+  digest_threshold: 3
+  digest_window_min: 60
+  vol_mult: 2.5
+  ter_pp: 0.2
+jobs:
+  - {name: brief_in, market: IN, at: "08:00", catchup_hours: 3}
+  - {name: login_nudge, market: IN, at: "08:45", catchup_hours: 2}
+  - {name: brief_us, market: US, at: "18:30", catchup_hours: 3, enabled: false}
+  - {name: monitors, market: IN, at: "17:30"}
+  - {name: monitors_us, market: US, at: "05:30", day_offset: 1, enabled: false}
+  - {name: kill_criteria, market: IN, at: "22:00"}
+  - {name: rescore, at: "08:30", weekday: 5, trading_days_only: false, catchup_hours: 15}
+  - {name: weekly_review, at: "09:00", weekday: 5, trading_days_only: false, catchup_hours: 15, stale_minutes: 240}
+  - {name: monthly_fund_review, at: "09:00", weekday: 5, nth_weekday: 1, trading_days_only: false, catchup_hours: 15, stale_minutes: 240}
+  - {name: backup, at: "07:00", weekday: 5, trading_days_only: false, catchup_hours: 15}

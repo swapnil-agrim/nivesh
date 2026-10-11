@@ -82,3 +82,12 @@ def test_brief_json(env: Env) -> None:
 
 def test_brief_unknown_market_exits_2(env: Env) -> None:
     assert call(env, "brief", "mars").exit_code == 2 and runs(env) == []
+
+
+def test_brief_states_the_holdings_snapshot_and_needs_no_session(env: Env) -> None:
+    hold(env[1], 0)
+    r = call(env, "brief", "india")
+    assert r.exit_code == 0, r.output
+    assert "Holdings snapshot as of 2026-01-01 (investright)" in r.stdout
+    assert not (env[1] / "investright_session.json").exists() and runs(env)[0][1] == "ok"
+    assert "no holdings snapshot loaded" not in r.stdout

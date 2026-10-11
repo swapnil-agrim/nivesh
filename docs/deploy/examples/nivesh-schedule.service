@@ -1,0 +1,9 @@
+# Example only: nothing is installed. A one-shot unit that runs one scheduler tick; the timer
+# next to it starts it every 5 minutes. Replace /opt/nivesh with your install directory.
+[Unit]
+Description=Nivesh scheduler tick
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/nivesh
+ExecStart=/opt/nivesh/.venv/bin/nivesh schedule run

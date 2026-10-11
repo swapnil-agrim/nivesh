@@ -5,7 +5,7 @@ NAV precedence: where several sources hold a date, the best-ranked source wins (
 """
 
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import duckdb
 
@@ -112,6 +112,16 @@ def latest_fund_meta(
         return None
     keys = [c.strip() for c in _META_COLS.split(",")]
     return FundMeta(**dict(zip(keys, row, strict=True)))
+
+
+def fund_meta_pair(
+    conn: duckdb.DuckDBPyConnection, security_id: int
+) -> tuple[FundMeta | None, FundMeta | None]:
+    """(the newest metadata, the newest one with an earlier `as_of`); either may be None."""
+    cur = latest_fund_meta(conn, security_id)
+    if cur is None:
+        return None, None
+    return cur, latest_fund_meta(conn, security_id, cur.as_of - timedelta(days=1))
 
 
 def write_fund_holdings(

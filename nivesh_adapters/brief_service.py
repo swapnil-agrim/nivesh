@@ -5,15 +5,21 @@ Read-only and deterministic: no model call. Every input that is missing becomes 
 """
 
 import sqlite3
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from pathlib import Path
 
 import duckdb
 
 from nivesh_adapters.analysis_data import _index as index_ref
 from nivesh_adapters.analysis_data import load_bars
-from nivesh_adapters.report import Table, clean
-from nivesh_adapters.report_templates import BriefInput
+from nivesh_adapters.report import Report, Table, clean, save_report
+from nivesh_adapters.report_check import finalize
+from nivesh_adapters.report_templates import BriefInput, brief_report
+from nivesh_adapters.run_support import Clock, Metered, plain_run
+from nivesh_adapters.stores import open_read_stores
 from nivesh_adapters.universe_service import BAR_WINDOW_DAYS, MARKETS, resolve_universe
 from nivesh_core.config import Settings
 from nivesh_core.errors import NiveshError
@@ -21,6 +27,7 @@ from nivesh_core.holdings_store import latest_holdings
 from nivesh_core.market_store import get_events, get_macro, get_news
 from nivesh_core.profile import Profile
 from nivesh_core.security_master import SecurityMaster
+from nivesh_core.timeutil import utcnow
 from nivesh_core.watch import watched
 from nivesh_engine.bars import Bar
 from nivesh_engine.macro import Obs, rates_snapshot
@@ -198,6 +205,18 @@ def _news(
         lines += [f"{symbol}: {' '.join(clean(n.title).split())}" for n in rows[:NEWS_PER_HOLDING]]
 
 
+def _snapshot(b: _Brief, sql: sqlite3.Connection) -> None:
+    """When the holdings came from and which source: the fallback when no session is open."""
+    lines = b.section("Holdings snapshot")
+    held = latest_holdings(sql)
+    if not held:
+        lines.append("no holdings snapshot loaded")
+        return
+    day = max(h.as_of for h in held)
+    sources = "/".join(sorted({h.source for h in held if h.as_of == day}))
+    lines.append(f"Holdings snapshot as of {day.isoformat()} ({sources})")
+
+
 def brief_input(
     duck: duckdb.DuckDBPyConnection, sql: sqlite3.Connection, settings: Settings, profile: Profile,
     market: str, day: date, run_at: datetime, run_id: int | None = None,
@@ -214,6 +233,7 @@ def brief_input(
     held, other = _tracked(sql)
     _events(b, duck, {**other, **held}, day)
     _news(b, duck, held, day)
+    _snapshot(b, sql)
     b.missing("sector leaders and laggards", SECTOR_REASON)
     headers = ("Market", "Index", "Level", "1-day change", "As of")
     return BriefInput(
@@ -221,3 +241,33 @@ def brief_input(
             (h, tuple(ls)) for h, ls in b.sections if ls),
         table=Table(headers, tuple(b.rows)), unavailable=tuple(b.unavailable), run_id=run_id,
     )  # fmt: skip
+
+
+@dataclass(frozen=True)
+class BriefOutcome:
+    run_id: int
+    run_dir: Path
+    report: Report
+    day: date
+
+
+def run_brief(
+    settings: Settings, profile: Profile, market: str, day: date, *, clock: Clock = utcnow,
+    deliver_fn: Callable[[Metered], None] | None = None,
+) -> BriefOutcome:  # fmt: skip
+    """Build, check and save the brief of `market` as of `day`: no model call, no spend. The
+    stores are read first and closed before the run row is made. `deliver_fn` runs inside the
+    run, right after the report is saved."""
+    run_at = clock()
+    with open_read_stores(settings) as st:
+        data = brief_input(st.duck, st.sql, settings, profile, market, day, run_at)
+    with plain_run(settings, "brief", clock=clock) as m:
+        m.status = "ok"
+        report = finalize(
+            brief_report(replace(data, run_id=m.run_id)), {"as_of": day}, m.run_dir,
+            max_digits=settings.report.max_tolerance_digits, metered=m,
+        )  # fmt: skip
+        save_report(m.run_dir, report, {"as_of": day}, m.tracer)
+        if deliver_fn is not None:
+            deliver_fn(m)
+    return BriefOutcome(m.run_id, m.run_dir, report, day)

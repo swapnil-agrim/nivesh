@@ -86,6 +86,11 @@ def build_message(report: Report, html_page: str, where: str | None = None) -> M
     return Message(subject, "\n".join(lines), html_page)
 
 
+def plain_message(subject: str, text: str) -> Message:
+    """A notice with no report behind it: the page is the text, escaped."""
+    return Message(subject, text, f"<pre>{html.escape(text)}</pre>")
+
+
 def blocked_reason(msg: Message, *, page: bool) -> str:
     """Empty when clean; otherwise kinds and positions only, never the matched text."""
     parts = [("subject", msg.subject), ("text", msg.text)] + ([("page", msg.html)] if page else [])

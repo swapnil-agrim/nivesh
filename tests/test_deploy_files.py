@@ -74,3 +74,36 @@ def test_existing_empty_dir_ends_0700(tmp_path: Path) -> None:
     tmp_path.chmod(0o755)
     ensure_data_dir(tmp_path)
     assert (tmp_path.stat().st_mode & 0o777) == 0o700
+
+
+EXAMPLES = ROOT / "docs" / "deploy" / "examples"
+
+
+def test_schedule_examples_are_text_only_and_call_the_tick_every_five_minutes() -> None:
+    files = {p.name: p.read_text() for p in EXAMPLES.iterdir()}
+    assert set(files) == {
+        "nivesh-schedule.cron", "nivesh-schedule.service", "nivesh-schedule.timer",
+        "com.nivesh.schedule.plist",
+    }  # fmt: skip
+    for name, text in files.items():
+        assert "nothing is installed" in text, name
+        assert scan_text(text) == [] and not re.search(r"sk-[A-Za-z0-9]{8,}", text), name
+        assert not SECRETISH.search(re.sub(r"</?key>", "", text)), name  # plist tags
+        assert "/opt/nivesh" in text or name.endswith(".timer"), name
+    assert "nivesh schedule run" in files["nivesh-schedule.cron"]
+    assert files["nivesh-schedule.cron"].count("*/5 * * * *") == 1
+    assert "ExecStart=/opt/nivesh/.venv/bin/nivesh schedule run" in files["nivesh-schedule.service"]
+    assert "OnUnitActiveSec=5min" in files["nivesh-schedule.timer"]
+    plist = files["com.nivesh.schedule.plist"]
+    assert "<integer>300</integer>" in plist and "<string>schedule</string>" in plist
+
+
+def test_schedule_guide_names_the_tick_and_the_owner_actions() -> None:
+    text = (ROOT / "docs" / "deploy" / "schedule.md").read_text()
+    for needle in (
+        "nivesh schedule run", "every five minutes", "Nothing is installed", "idempotent".title(),
+        "nse_holidays", "nivesh schedule invalidation", "missed window", "catchup_hours",
+        "18:30 IST", "19:30 IST", "No ingest job",
+    ):  # fmt: skip
+        assert needle in text, needle
+    assert scan_text(text) == [] and not SECRETISH.search(text)

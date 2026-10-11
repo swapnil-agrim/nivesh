@@ -146,3 +146,19 @@ def test_rewriting_a_month_replaces_it_so_dropped_lines_do_not_linger(
     write_fund_holdings(db, 7, [row("INF000A01011"), row("INF000A01029")])
     write_fund_holdings(db, 7, [row("INF000A01011")])
     assert [r.isin for r in get_fund_holdings(db, 7, date(2025, 1, 31))] == ["INF000A01011"]
+
+
+def test_fund_meta_pair_returns_the_two_newest_distinct_dates(
+    db: duckdb.DuckDBPyConnection,
+) -> None:
+    from nivesh_core.mf_store import fund_meta_pair
+
+    assert fund_meta_pair(db, 7) == (None, None)
+    write_fund_meta(db, 7, meta(date(2026, 1, 1), expense_ratio=D("1.5000")))
+    cur, prev = fund_meta_pair(db, 7)
+    assert cur is not None and cur.as_of == date(2026, 1, 1) and prev is None
+    write_fund_meta(db, 7, meta(date(2026, 2, 1), expense_ratio=D("1.2500")))
+    write_fund_meta(db, 7, meta(date(2026, 3, 1), expense_ratio=D("1.1000")))
+    cur, prev = fund_meta_pair(db, 7)
+    assert cur is not None and prev is not None
+    assert (cur.as_of, prev.as_of) == (date(2026, 3, 1), date(2026, 2, 1))

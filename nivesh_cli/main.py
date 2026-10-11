@@ -17,6 +17,7 @@ from nivesh_cli.market import market_app, master_app
 from nivesh_cli.mf import mf_app
 from nivesh_cli.research import research_app
 from nivesh_cli.review import review_app
+from nivesh_cli.schedule import alerts_app, schedule_app
 from nivesh_cli.scorecard import scorecard_app
 from nivesh_cli.thesis import thesis_app
 from nivesh_cli.universe import universe_app
@@ -44,6 +45,7 @@ app.registered_commands.extend(engine_app.registered_commands)  # ta, fa, valuat
 app.registered_commands.extend(ideas_app.registered_commands)  # ideas
 app.registered_commands.extend(research_app.registered_commands)  # research
 app.registered_commands.extend(brief_app.registered_commands)  # brief
+app.registered_commands.extend(alerts_app.registered_commands)  # alerts
 app.registered_commands.extend(deliver_app.registered_commands)  # deliver
 app.registered_commands.extend(
     scorecard_app.registered_commands
@@ -55,6 +57,7 @@ app.add_typer(thesis_app, name="thesis")
 app.add_typer(review_app, name="review")
 app.add_typer(universe_app, name="universe")
 app.add_typer(watch_app, name="watch")
+app.add_typer(schedule_app, name="schedule")
 
 
 @app.callback()

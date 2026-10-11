@@ -222,12 +222,12 @@ def test_review_holdings_appends_a_ledger_row_per_call_and_leaves_stdout_unchang
 def test_a_ledger_failure_is_a_warning_and_the_reviews_still_print(
     cli_env: Env, held: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import nivesh_cli.review as creview
+    import nivesh_adapters.review_service as svc
 
     def boom(*a: Any, **k: Any) -> None:
         raise sqlite3.OperationalError("disk")
 
-    monkeypatch.setattr(creview, "record_calls", boom)
+    monkeypatch.setattr(svc, "record_calls", boom)
     r = runner.invoke(app, [*cli_env[0], "review", "holdings", "--only", "RELI"])
     assert r.exit_code == 0 and "warning: the ledger rows were not saved" in r.output
     assert any(x.startswith("RELI") for x in r.output.splitlines())
