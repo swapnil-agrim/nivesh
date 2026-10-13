@@ -148,4 +148,12 @@ def test_digest_text_has_no_run_of_nine_digits_even_for_an_all_digit_hash() -> N
     import re
 
     out = digest_text("1234567890" * 6 + "1234")
-    assert not re.search(r"\d{9}", out) and out.replace("-", "") == "1234567890" * 6 + "1234"
+    assert not re.search(r"\d{9}", out) and out.replace(".", "") == "1234567890" * 6 + "1234"
+
+
+def test_digest_text_never_reads_as_a_phone_number_across_a_group_boundary() -> None:
+    # real digests ended a group in 5 digits and began the next with 5 (a 5-5 phone shape)
+    from nivesh_core.pii_scan import scan_text
+
+    out = digest_text("02d99357" + "81814e2a" + "0" * 48)
+    assert scan_text(out) == [] and scan_text(f'"digest": "{out}"') == []

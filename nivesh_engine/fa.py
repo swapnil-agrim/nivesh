@@ -11,7 +11,11 @@ equity; ROIC is operating income x (1 - tax rate) over debt + equity - cash, the
 the filing's effective rate when sensible, else the owner's default (listed in the inputs);
 accruals are (net income - operating cash flow) over closing assets; capex is a positive outflow.
 India operating income is a profit-before-tax proxy, so EBIT, EBITDA, ROIC, ROCE and interest
-cover are unavailable for India rather than mislabelled. Banks and NBFCs swap the EBITDA-based
+cover are unavailable for India rather than mislabelled. Every other India metric is computed
+from the rows when the source filed them (Tapetide files cash flow and balance sheet, so cash
+conversion, free-cash-flow margin and accruals work) and otherwise says which item is missing.
+India net income may include minority interest (ADR-0015), which overstates net margin and ROE
+for groups with large minorities. Banks and NBFCs swap the EBITDA-based
 and working-capital metrics for asset quality, margin, funding and capital metrics. Coverage is
 the share of applicable metrics that are available; a metric that cannot apply to the security
 (for example promoter pledge for a US company) is marked "not applicable" and not counted.
@@ -31,13 +35,10 @@ from nivesh_engine.statements import StatementRow, latest_as_of
 QUANTUM = Decimal("0.00000001")
 NOT_APPLICABLE = "not applicable"
 BANK_ITEMS = ("gnpa_pct", "nnpa_pct", "nim_pct", "casa_pct", "car_pct")
+FINANCIAL_ITEMS = (*BANK_ITEMS, "deposits", "financing_profit")  # rows only financials have
 _EBIT_BASED = (
     "operating_margin_pct", "ebitda_margin_pct", "roic_pct", "roce_pct", "net_debt_ebitda",
     "interest_cover",
-)  # fmt: skip
-_INDIA_GAPS = (
-    "current_ratio", "cfo_to_pat", "fcf_margin_pct", "accruals_ratio_pct", "receivable_days",
-    "inventory_days", "payable_days", "working_capital_days",
 )  # fmt: skip
 _NOT_FOR_FINANCIALS = frozenset(
     {
@@ -50,7 +51,6 @@ _NOT_FOR_FINANCIALS = frozenset(
 _INDIA_PBT = (
     "India operating_income is profit before tax, not EBIT; it is never presented as EBIT or EBITDA"
 )
-_INDIA_VOCAB = "India filings carry no balance-sheet or cash-flow items for this metric"
 
 
 @dataclass(frozen=True)
@@ -65,11 +65,12 @@ class FaResult:
 
 
 def sector_kind_of(sector: str | None, rows: Sequence[StatementRow], cfg: AnalysisSettings) -> str:
-    """ "financial" for a configured financial sector name or when bank items are present."""
+    """ "financial" for a configured financial sector name or when rows only a bank or NBFC has
+    (asset quality, deposits, financing profit) are present."""
     names = {s.lower() for s in cfg.fa.financial_sectors}
     if sector and sector.strip().lower() in names:
         return "financial"
-    return "financial" if any(r.item in BANK_ITEMS for r in rows) else "general"
+    return "financial" if any(r.item in FINANCIAL_ITEMS for r in rows) else "general"
 
 
 @dataclass(frozen=True)
@@ -369,8 +370,6 @@ def _general_metrics(book: _Book, market: str, default_tax: Decimal) -> dict[str
     if market == "IN":
         for name in _EBIT_BASED:
             out[name] = na(_INDIA_PBT)
-        for name in _INDIA_GAPS:
-            out[name] = na(_INDIA_VOCAB)
     return out
 
 

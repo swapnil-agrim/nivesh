@@ -16,10 +16,11 @@ from nivesh_core.timeutil import to_iso, utcnow
 
 
 def digest_text(hexdigest: str) -> str:
-    """A hex digest in groups of eight joined by hyphens. A long run of hex digits can hold nine
+    """A hex digest in groups of eight joined by dots. A long run of hex digits can hold nine
     or more decimal digits in a row, which the PII scanner (rightly cautious) reports; groups
-    of eight cannot."""
-    return "-".join(hexdigest[i : i + 8] for i in range(0, len(hexdigest), 8))
+    of eight cannot. The joiner is not a hyphen or a space: a group ending in five digits and the
+    next starting with five would read as an Indian phone number (5-5 shape) to the scanner."""
+    return ".".join(hexdigest[i : i + 8] for i in range(0, len(hexdigest), 8))
 
 
 def prompt_version(text: str) -> str:

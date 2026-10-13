@@ -44,7 +44,7 @@ def test_trace_gets_report_saved_records_with_digest_not_content(tmp_path: Path)
     recs = [r for r in read_trace(d / "trace.jsonl") if r["type"] == "report_saved"]
     assert [r["name"] for r in recs] == list(FILES)
     text = (d / "trace.jsonl").read_text()
-    assert "Steady cash flow" not in text and all("-" in r["digest"] for r in recs)
+    assert "Steady cash flow" not in text and all("." in r["digest"] for r in recs)
 
 
 def test_saved_files_pass_scan_paths_clean(tmp_path: Path) -> None:

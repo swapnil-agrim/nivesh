@@ -20,10 +20,10 @@ make check   # ruff, mypy, pytest with coverage gate
 `make check` is also exactly what CI runs. The coverage gate (85% branch) covers `nivesh_engine` and
 `nivesh_adapters`.
 
-Market data (E4) can use three secrets, set with `nivesh secrets set NAME` (or env vars):
+Market data (E4) can use four secrets, set with `nivesh secrets set NAME` (or env vars):
 `EDGAR_CONTACT` (your contact for the SEC User-Agent; personal data, never put it in config),
 `FRED_API_KEY` and `FMP_API_KEY` (free-tier keys; without them the macro and estimates features
-report the gap instead of failing). None is needed for Indian equities: without `EDGAR_CONTACT`,
+report the gap instead of failing), and `TAPETIDE_TOKEN` (a free token from tapetide.com/settings/tokens; the source of Indian statements, free plan 50 calls a day, 6 per company, cached 7 days; without it `market fundamentals` says so and `fa` reports India items unavailable). Prices need none of them: without `EDGAR_CONTACT`,
 `nivesh master build` skips US securities, says so and builds the rest. Then `nivesh master build`,
 and for example `nivesh market prices RELIANCE --start 2026-01-01 --end 2026-01-31`. NSE holidays
 ship for 2024-2026 (built in, and united per year with `market.nse_holidays` in

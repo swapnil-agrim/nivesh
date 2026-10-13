@@ -96,6 +96,46 @@ def test_fundamentals_append_only_across_filed_at_and_idempotent(
     assert get_statement_rows(db, 2) == []
 
 
+def test_two_sources_land_in_one_transaction(db: duckdb.DuckDBPyConnection) -> None:
+    from nivesh_core.market_store import get_statement_rows, write_fundamentals
+
+    good, other = srow(), srow(item="net_income", value="5")
+    write_fundamentals(db, 1, [good], "tapetide", more=[("tapetide_est", [other])])  # type: ignore[list-item]
+    assert db.execute("select item, source from fundamental order by item").fetchall() == [
+        ("net_income", "tapetide_est"), ("revenue", "tapetide"),
+    ]  # fmt: skip
+    overflow = srow(item="eps", value="1" + "0" * 30)  # does not fit DECIMAL(28,4)
+    with pytest.raises(duckdb.Error):
+        write_fundamentals(
+            db, 1, [srow(item="cfo")], "tapetide", more=[("tapetide_est", [overflow])]
+        )  # type: ignore[list-item]
+    assert [r.item for r in get_statement_rows(db, 1)] == ["net_income", "revenue"]  # all or none
+
+
+def test_reported_row_replaces_the_estimated_row_of_the_same_period(
+    db: duckdb.DuckDBPyConnection,
+) -> None:
+    from nivesh_core.market_store import get_statement_rows, write_fundamentals
+
+    est = srow(filed=date(2026, 5, 31))
+    write_fundamentals(db, 1, [est, srow(item="cfo")], "tapetide_est")  # type: ignore[list-item]
+    write_fundamentals(db, 1, [srow(value="12", filed=date(2026, 4, 27))], "tapetide",  # type: ignore[list-item]
+                       supersede="tapetide_est")  # fmt: skip
+    got = {(r.item, r.value, r.filed_at) for r in get_statement_rows(db, 1)}
+    assert got == {("revenue", D("12"), date(2026, 4, 27)), ("cfo", D("10"), DAY)}
+
+
+def test_shareholding_can_carry_its_own_source(db: duckdb.DuckDBPyConnection) -> None:
+    from nivesh_core.market_models import ShareholdingRow
+    from nivesh_core.market_store import write_fundamentals
+
+    row = ShareholdingRow(period_end=DAY, promoter_pct=D("50"), filed_at=DAY)
+    write_fundamentals(
+        db, 1, [], "tapetide", shareholding=[row], shareholding_source="tapetide_est"
+    )
+    assert db.execute("select source from shareholding").fetchall() == [("tapetide_est",)]
+
+
 def test_shareholding_roundtrip_latest_filing_per_quarter(db: duckdb.DuckDBPyConnection) -> None:
     from nivesh_core.market_models import ShareholdingRow
     from nivesh_core.market_store import get_shareholding, write_fundamentals

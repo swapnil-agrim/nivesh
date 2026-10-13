@@ -18,7 +18,8 @@ from nivesh_core.pii_scan import scan_paths, scan_text
 from nivesh_core.trace import Tracer
 from nivesh_mcp.base import ReadOnlyServer
 from tests import pii_values as pv
-from tests.cli.test_market import funds, macro, net, newsnet, prices  # noqa: F401 - fixtures
+from tests import tapetide_fx as tx
+from tests.cli.test_market import funds, macro, net, newsnet, prices, tape  # noqa: F401 - fixtures
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -209,10 +210,10 @@ async def test_market_pipeline_leaves_no_pii_anywhere(
     fid = listing["data"]["filings"][0]["filing_id"]
     payloads.append(str(await call("filings", "get_filing_text", filing_id=fid, section="mdna")))
 
-    secrets_ = (pv.edgar_contact(), pv.fred_key(), pv.fmp_key())
+    secrets_ = (pv.edgar_contact(), pv.fred_key(), pv.fmp_key(), tx.token())
     texts = {"sqlite": sqlite_dump, "duckdb": "\n".join(parts), "cli": "\n".join(outputs),
              "mcp": "\n".join(payloads)}  # fmt: skip
-    for needle in ("sec_edgar", "bse_xbrl", "nse_bhavcopy", "usdinr", "fmp", "example-news"):
+    for needle in ("sec_edgar", "tapetide", "nse_bhavcopy", "usdinr", "fmp", "example-news"):
         assert needle in texts["duckdb"], needle  # the pipeline really stored each data family
     assert '"close"' in texts["mcp"] or "'close'" in texts["mcp"]
     for label, text in texts.items():
