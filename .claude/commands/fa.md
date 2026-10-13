@@ -14,7 +14,9 @@ support. Quote numbers exactly as the tool returned them.
 For an Indian company, say that net income, net margin and ROE come from Tapetide's Net Profit,
 which includes minority interest (overstated for groups with large minorities, for example
 RELIANCE and HDFCBANK), that filing dates before about Sep 2024 are estimates, and that
-operating margin, EBITDA, ROIC and cash items are unavailable for India (ADR-0015).
+operating margin, EBITDA, ROIC, ROCE, interest cover, gross margin, working-capital days and the
+current ratio are unavailable for India (cash conversion, FCF margin and accruals are computed from
+the cash flow statement), each with its reason (ADR-0015).
 
 For a saved, checked note the handler is `nivesh fa $ARGUMENTS --note` (add `--analyst` for one
 quick analyst view). Interactive sessions cannot run shell commands, so offer that line to the
