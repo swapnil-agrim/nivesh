@@ -1,14 +1,23 @@
 """India end-of-day prices (ST-4.2): NSE UDiFF and BSE bhavcopy, NSE index closes, NSE corporate
 actions, and Yahoo chart JSON as fallback and cross-check (a direct call, no yfinance).
 
-Wire formats are per spec, unverified against live sources (follow-up D2). `_fetch` returns
-JSON-native data only (text or parsed JSON); the `parse_*` functions build models afterwards.
+Wire formats verified against live sources on 2026-10-13: NSE UDiFF bhavcopy zip, NSE index
+close file, BSE UDiFF bhavcopy and the Yahoo chart. The NSE corporate-actions endpoint answers
+404 live (follow-up). `_fetch` returns JSON-native data only (text or parsed JSON); the `parse_*`
+functions build models afterwards.
+
+Bad-row policy: `validate_payload` is structural only (columns, parseable dates). Row-level
+price checks live in the `parse_*` functions: the requested security's bad row is fatal, and
+with `audit=True` every other row is checked too and counted in `ParsedBars.bad_rows` by
+reason instead of rejecting the day (live NSE files carry T0 rows whose close is outside the
+day's range).
 """
 
 import csv
 import io
 import re
 import zipfile
+from collections import Counter
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -37,6 +46,7 @@ UA = {"User-Agent": "nivesh/0.1"}
 class ParsedBars:
     bars: list[PriceBar] = field(default_factory=list)
     skipped: int = 0  # symbols not in the master (never auto-created)
+    bad_rows: Counter[str] = field(default_factory=Counter)  # audit: "<series>: <reason>" -> rows
 
 
 def _num(adapter: str, field_name: str, v: str) -> Decimal | None:
@@ -61,6 +71,18 @@ def check_ohlc(
                 raise DataQualityError(adapter, f"{what} {k}", v, "outside the day's range")
 
 
+def _audit_row(source: str, r: Mapping[str, str], n: int, cols: tuple[str, ...]) -> str | None:
+    """Reason a row we do not store fails the price rules, or None when it is fine."""
+    try:
+        o, h, low, c = (_num(source, f"line {n} {k}", r[k]) for k in cols)
+        if c is None:
+            return "missing close"
+        check_ohlc(source, f"line {n}", o, h, low, c)
+    except DataQualityError as e:
+        return e.reason
+    return None
+
+
 def parse_bhavcopy(
     text: str,
     ids: Mapping[str, int],
@@ -68,24 +90,29 @@ def parse_bhavcopy(
     key_col: str,
     source: str,
     series: Collection[str] | None = EQUITY_SERIES,
+    audit: bool = False,
 ) -> ParsedBars:
     """UDiFF CSV rows for the securities in `ids` (key = `key_col` value); others are counted.
 
     NSE rows are kept for equity/ETF series only; BSE's `SctySrs` is a scrip group (A, B, T...),
-    so BSE callers pass `series=None` and rely on the id map instead."""
+    so BSE callers pass `series=None` and rely on the id map instead. A bad row of a requested
+    security raises; with `audit` every other row (any series) is price-checked and a failure is
+    counted in `bad_rows` as `"<series>: <reason>"`."""
     out = ParsedBars()
+    cols = ("OpnPric", "HghPric", "LwPric", "ClsPric")
     for n, r in enumerate(csv.DictReader(io.StringIO(text)), start=2):
         try:
-            if series is not None and r["SctySrs"].strip() not in series:
-                continue
+            ser = r["SctySrs"].strip()
             sid = ids.get(r[key_col].strip())
             if sid is None:
-                out.skipped += 1
+                if audit and (why := _audit_row(source, r, n, cols)):
+                    out.bad_rows[f"{ser}: {why}"] += 1
+                elif series is None or ser in series:
+                    out.skipped += 1
                 continue
-            o, h, low, c = (
-                _num(source, f"line {n} {k}", r[k])
-                for k in ("OpnPric", "HghPric", "LwPric", "ClsPric")
-            )
+            if series is not None and ser not in series:
+                continue
+            o, h, low, c = (_num(source, f"line {n} {k}", r[k]) for k in cols)
             vol = _num(source, f"line {n} volume", r["TtlTradgVol"])
             if c is None:
                 raise DataQualityError(source, f"line {n} close", "", "missing close")
@@ -109,24 +136,21 @@ def parse_bhavcopy(
     return out
 
 
-def parse_indices(text: str, ids: Mapping[str, int]) -> ParsedBars:
-    """NSE `ind_close_all` rows; keys are upper-case index names."""
+def parse_indices(text: str, ids: Mapping[str, int], *, audit: bool = False) -> ParsedBars:
+    """NSE `ind_close_all` rows; keys are upper-case index names. With `audit`, other indices'
+    bad rows are counted in `bad_rows` (as `"index: <reason>"`) instead of ignored."""
     out = ParsedBars()
+    cols = ("Open Index Value", "High Index Value", "Low Index Value", "Closing Index Value")
     for n, r in enumerate(csv.DictReader(io.StringIO(text)), start=2):
         try:
             sid = ids.get(r["Index Name"].strip().upper())
             if sid is None:
-                out.skipped += 1
+                if audit and (why := _audit_row("nse_indices", r, n, cols)):
+                    out.bad_rows[f"index: {why}"] += 1
+                else:
+                    out.skipped += 1
                 continue
-            o, h, low, c = (
-                _num("nse_indices", f"line {n} {k}", r[k])
-                for k in (
-                    "Open Index Value",
-                    "High Index Value",
-                    "Low Index Value",
-                    "Closing Index Value",
-                )
-            )
+            o, h, low, c = (_num("nse_indices", f"line {n} {k}", r[k]) for k in cols)
             if c is None:
                 raise DataQualityError("nse_indices", f"line {n} close", "", "missing close")
             check_ohlc("nse_indices", f"line {n}", o, h, low, c)
@@ -294,21 +318,35 @@ def fetch_yahoo(client: httpx.Client, symbol: str, start: str, end: str) -> Any:
     return resp.json()
 
 
-class _AnyId(dict[str, int]):
-    """Id map that accepts every key, so validation checks every row."""
+_BHAV_COLUMNS = ("TradDt", "TckrSymb", "SctySrs", "OpnPric", "HghPric", "LwPric", "ClsPric")
+_INDEX_COLUMNS = ("Index Name", "Index Date", "Open Index Value", "High Index Value",
+                  "Low Index Value", "Closing Index Value")  # fmt: skip
 
-    def get(self, key: str, default: Any = None) -> int:
-        return 0
+
+def _validate_structure(adapter: str, text: str, columns: tuple[str, ...], date_col: str) -> None:
+    """File-fatal damage only: a missing column or an unparseable date. Row-level price rules are
+    applied by `parse_*` (a bad row of another security must not reject the day)."""
+    reader = csv.DictReader(io.StringIO(text))
+    missing = [c for c in columns if c not in (reader.fieldnames or [])]
+    if missing:
+        raise DataQualityError(adapter, "header", ",".join(missing), "missing column")
+    fmt = "%d-%m-%Y" if date_col == "Index Date" else "%Y-%m-%d"
+    for n, r in enumerate(reader, start=2):
+        try:
+            datetime.strptime((r[date_col] or "").strip(), fmt)
+        except ValueError:
+            raise DataQualityError(adapter, f"line {n} date", r[date_col], "bad date") from None
 
 
 def validate_payload(data: Any) -> None:
-    """Parse a fetched payload fully so malformed data is rejected before it is cached."""
+    """Reject malformed data before it is cached: Yahoo is parsed fully, bhavcopy and index
+    files are checked structurally only."""
     if isinstance(data, dict) and "chart" in data:
         parse_yahoo(data, 0)
     elif isinstance(data, str) and data.startswith("TradDt"):
-        parse_bhavcopy(data, _AnyId(), key_col="TckrSymb", source="bhavcopy", series=None)
+        _validate_structure("bhavcopy", data, _BHAV_COLUMNS, "TradDt")
     elif isinstance(data, str) and data.startswith("Index Name"):
-        parse_indices(data, _AnyId())
+        _validate_structure("nse_indices", data, _INDEX_COLUMNS, "Index Date")
 
 
 MAX_UNZIPPED = 50 * 1024 * 1024  # a bhavcopy is a few MB; anything bigger is not one

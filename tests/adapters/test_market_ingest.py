@@ -188,9 +188,8 @@ def test_ingest_rejects_bad_bar_without_partial_write(env: Env) -> None:
     with pytest.raises(DataQualityError):
         run_in(env, feed)
     assert env.duck.execute("SELECT count(*) FROM price_bar").fetchone() == (0,)
-    assert env.duck.execute(
-        "SELECT count(*) FROM cache_entry WHERE payload LIKE '%-5.0%'"
-    ).fetchone() == (0,)  # bad data is never cached
+    # the day's file is structurally sound so it stays cached (one security's bad row no longer
+    # rejects the file); the requested security's bad row is fatal when parsed, nothing is stored
 
 
 def test_adj_close_recomputed_after_new_action(env: Env) -> None:
@@ -249,3 +248,52 @@ def test_ingest_bonus_from_nse_and_split_from_yahoo_adjusts_once(env: Env) -> No
     rep = run_in(env, feed)
     bars = get_bars(env.duck, rep.security_id)
     assert bars[0].adj_close == D("50.000000") and bars[3].adj_close == D("103.000000")
+
+
+T0_BAD = "ZZBAD,T0,6.65,6.65,6.65,6.61"
+
+
+def test_ingest_prices_skips_other_security_bad_row_and_reports_it(env: Env) -> None:
+    rep = run_in(env, india_feed(extra_rows=(T0_BAD,)))
+    assert rep.flags == {"ok": 4}
+    assert rep.bad_rows == {"T0: outside the day's range": 4}  # one per session day
+    assert len(get_bars(env.duck, env.sec("RELIANCE").id)) == 4
+
+
+def test_ingest_prices_clean_files_report_no_bad_rows(env: Env) -> None:
+    assert run_in(env, india_feed()).bad_rows == {}
+
+
+def test_ingest_prices_requested_bad_row_is_fatal(env: Env) -> None:
+    with pytest.raises(DataQualityError, match="outside the day's range"):
+        run_in(env, india_feed(extra_rows=("RELIANCE,EQ,6.65,6.65,6.65,6.61",)))
+    assert get_bars(env.duck, env.sec("RELIANCE").id) == []
+
+
+def test_ingest_prices_index_bad_row_of_other_index_counted(env: Env) -> None:
+    feed = india_feed()
+    nifty = env.sec("NIFTY 50")
+    # the Feed serves one Nifty 50 row per index file; a bad row for another index is audited
+    base = feed.__call__
+
+    def with_bad_index(req: httpx.Request) -> httpx.Response:
+        resp = base(req)
+        if "ind_close_all" in str(req.url):
+            return httpx.Response(200, text=resp.text + "Nifty Bank,22-01-2026,5,6,5,9,-\n")
+        return resp
+
+    c = httpx.Client(transport=httpx.MockTransport(with_bad_index))
+    rep = ingest_prices(
+        env.duck, env.settings, nifty, IN_DAYS[0], IN_DAYS[-1],
+        india=lambda: IndiaPrices(c), us=lambda: UsPrices(c),
+    )  # fmt: skip
+    assert rep.bad_rows == {"index: outside the day's range": 4}
+
+
+def test_calendar_for_nse_sees_builtin_2025() -> None:
+    from nivesh_adapters.market_ingest import calendar_for
+
+    cal = calendar_for("IN", Settings(market=MarketSettings()))
+    assert not cal.is_session(date(2025, 8, 15)) and cal.is_session(date(2025, 8, 18))
+    with pytest.raises(CalendarUnknown, match="2027"):
+        cal.is_session(date(2027, 1, 4))

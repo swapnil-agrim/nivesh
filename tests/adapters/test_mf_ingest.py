@@ -480,3 +480,11 @@ def test_holdings_fixtures_pii_clean() -> None:
     from nivesh_core.pii_scan import scan_paths
 
     assert scan_paths([FX]) == []
+
+
+def test_mf_holidays_include_builtin_years() -> None:
+    from nivesh_adapters.mf_ingest import _holidays
+    from nivesh_core.config import MarketSettings, Settings
+
+    got = _holidays(Settings(market=MarketSettings(nse_holidays={2027: [date(2027, 1, 26)]})))
+    assert date(2025, 8, 15) in got and date(2026, 10, 20) in got and date(2027, 1, 26) in got

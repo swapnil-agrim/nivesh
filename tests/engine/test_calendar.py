@@ -116,3 +116,16 @@ def test_sessions_between_is_sorted_and_inclusive() -> None:
     s = NYSE.sessions(date(2024, 3, 25), date(2024, 4, 1))
     assert s == sorted(s) and s[0] == date(2024, 3, 25) and s[-1] == date(2024, 4, 1)
     assert date(2024, 3, 29) not in s and (s[-1] - s[0]) <= timedelta(days=7)
+
+
+def test_nyse_2025_01_09_national_day_of_mourning_is_closed() -> None:
+    assert date(2025, 1, 9) in nyse_holidays(2025) and not NYSE.is_session(date(2025, 1, 9))
+    assert NYSE.is_session(date(2025, 1, 8)) and NYSE.is_session(date(2025, 1, 10))
+    assert date(2024, 1, 9) not in nyse_holidays(2024)
+
+
+def test_calendar_unknown_message_names_config_key_and_builtin_range() -> None:
+    with pytest.raises(CalendarUnknown) as e:
+        NSE.is_session(date(2025, 1, 6))
+    msg = str(e.value)
+    assert "market.nse_holidays" in msg and "config/nivesh.yaml" in msg and "2024-2026" in msg

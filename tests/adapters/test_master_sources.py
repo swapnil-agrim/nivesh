@@ -1,9 +1,11 @@
+from datetime import date
 from pathlib import Path
 
 import httpx
 import pytest
 
 from nivesh_adapters.master_sources import (
+    URLS,
     MasterSources,
     default_indices,
     parse_amfi,
@@ -37,11 +39,30 @@ def test_parse_nse_skips_non_equity_series_and_blank_isin() -> None:
     assert "DEBTCO" not in syms and "NOISIN" not in syms and "TATASTEEL" in syms
 
 
-def test_parse_bse_scrips_maps_code_symbol_name_isin_industry() -> None:
+def test_parse_bse_udiff_gives_symbol_name_isin_bse_code() -> None:
     rows = {r.symbol: r for r in parse_bse(text("bse_scrips.csv"))}
-    assert rows["RELIANCE"].bse_code == "500325" and rows["RELIANCE"].industry == "Refineries"
-    assert rows["RELIANCE"].isin == "INE002A01018" and rows["RELIANCE"].exchange == "BSE"
-    assert "DELIST" not in rows
+    r = rows["RELIANCE"]
+    assert (r.bse_code, r.isin, r.exchange, r.name) == (
+        "500325", "INE002A01018", "BSE", "RELIANCE INDUSTRIES LTD.",
+    )  # fmt: skip
+    assert r.industry is None  # the bhavcopy carries no industry
+    assert rows["TCS"].bse_code == "532540" and rows["SBIN"].bse_code == "500112"
+
+
+def test_parse_bse_skips_blank_isin_and_non_equity_groups() -> None:
+    # live 2026-10-13 file: groups A/B/T/X/XT/M/MT/Z/ZP/E/IF/P/MS/TS carry equity-like scrips;
+    # F (debt, bonds, ETFs of AMC debt funds), G (gilts), W (warrants), R (rights) are dropped
+    syms = {r.symbol for r in parse_bse(text("bse_scrips.csv"))}
+    assert syms == {"RELIANCE", "TCS", "SBIN"}  # NOISIN has no ISIN, 7NCD30 is group F
+
+
+def test_parse_bse_missing_udiff_column_raises() -> None:
+    with pytest.raises(DataQualityError, match="missing column"):
+        parse_bse("TckrSymb,ISIN\nAAA,INE000A01010\n")
+
+
+def test_amfi_url_is_portal_host() -> None:
+    assert URLS["amfi"] == "https://portal.amfiindia.com/spages/NAVAll.txt"
 
 
 def test_parse_amfi_navall_yields_one_row_per_scheme_isin_with_amfi_code_and_symbol_isin() -> None:
@@ -135,3 +156,78 @@ def test_parse_sec_maps_arca_spellings() -> None:
     }  # fmt: skip
     rows = {r.symbol: r.exchange for r in parse_sec(json.dumps(doc))}
     assert rows == {"SPYA": "ARCA", "QQQB": "ARCA", "ODD": "US"}
+
+
+def test_amfi_fetch_follows_302() -> None:
+    moved = "https://portal.amfiindia.com/spages/NAVAll-moved.txt"
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if str(req.url) == URLS["amfi"]:
+            return httpx.Response(302, headers={"Location": moved})
+        return (
+            httpx.Response(200, text="navall body")
+            if str(req.url) == moved
+            else httpx.Response(500)
+        )
+
+    assert MasterSources(client(handler)).fetch(resource="amfi").data == "navall body"
+
+
+def test_sec_fetch_does_not_follow_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(str(req.url))
+        return httpx.Response(302, headers={"Location": "https://elsewhere.example/x"})
+
+    monkeypatch.setenv("EDGAR_CONTACT", pv.edgar_contact())
+    with pytest.raises(SourceUnavailable, match="302"):
+        MasterSources(client(handler)).fetch(resource="sec")
+    assert seen == [URLS["sec"]]  # the contact User-Agent never leaves sec.gov
+
+
+TODAY = date(2026, 10, 13)
+UDIFF_HEAD = text("bse_scrips.csv").splitlines()[0]
+
+
+def bse_url(d: date) -> str:
+    return URLS["bse"].format(d=d.strftime("%Y%m%d"))
+
+
+def test_bse_master_walks_back_over_404s() -> None:
+    seen: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(str(req.url))
+        return (
+            httpx.Response(200, text=text("bse_scrips.csv"))
+            if len(seen) == 4
+            else httpx.Response(404)
+        )
+
+    got = MasterSources(client(handler), today=TODAY).fetch(resource="bse").data
+    assert got == text("bse_scrips.csv")
+    assert seen == [bse_url(date(2026, 10, 13 - i)) for i in range(4)]
+
+
+def test_bse_master_html_200_counts_as_a_miss_and_walk_back_continues() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        if str(req.url) == bse_url(TODAY):
+            return httpx.Response(200, text="<!DOCTYPE html><html></html>")
+        return httpx.Response(200, text=text("bse_scrips.csv"))
+
+    got = MasterSources(client(handler), today=TODAY).fetch(resource="bse").data
+    assert got.startswith("TradDt")
+
+
+def test_bse_master_gives_up_after_ten_days() -> None:
+    n = 0
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        nonlocal n
+        n += 1
+        return httpx.Response(404)
+
+    with pytest.raises(SourceUnavailable, match="no BSE bhavcopy in the last 10 days"):
+        MasterSources(client(handler), today=TODAY).fetch(resource="bse")
+    assert n == 10

@@ -20,12 +20,17 @@ make check   # ruff, mypy, pytest with coverage gate
 `make check` is also exactly what CI runs. The coverage gate (85% branch) covers `nivesh_engine` and
 `nivesh_adapters`.
 
-Market data (E4) needs three secrets, set with `nivesh secrets set NAME` (or env vars): `EDGAR_CONTACT`
-(your contact for the SEC User-Agent; personal data, never put it in config), `FRED_API_KEY` and
-`FMP_API_KEY` (free-tier keys; without them the macro and estimates features report the gap instead
-of failing). Then `nivesh master build`, and for example `nivesh market prices RELIANCE --start
-2026-01-01 --end 2026-01-31`. Complete `market.nse_holidays` in `config/nivesh.yaml` from the NSE
-circular: a year with no entry fails loudly instead of guessing.
+Market data (E4) can use three secrets, set with `nivesh secrets set NAME` (or env vars):
+`EDGAR_CONTACT` (your contact for the SEC User-Agent; personal data, never put it in config),
+`FRED_API_KEY` and `FMP_API_KEY` (free-tier keys; without them the macro and estimates features
+report the gap instead of failing). None is needed for Indian equities: without `EDGAR_CONTACT`,
+`nivesh master build` skips US securities, says so and builds the rest. Then `nivesh master build`,
+and for example `nivesh market prices RELIANCE --start 2026-01-01 --end 2026-01-31`. NSE holidays
+ship for 2024-2026 (built in, and united per year with `market.nse_holidays` in
+`config/nivesh.yaml`); extend the list yearly from the NSE circular: a year with no entry anywhere
+still fails loudly instead of guessing. `market prices` skips a bad row of another security (such as
+a T0 trade-to-trade row with a close outside its range) and reports the count; a bad row of the
+requested security stays an error.
 
 ## CI and merge blocking
 CI (`.github/workflows/ci.yml`) must pass before merge. Branch protection requiring the `ci`
@@ -79,7 +84,7 @@ a manual decision.
   aliases) exist; later epics add the rest as migrations (see ADR-0002).
 - E4 deferred (each gets a follow-up issue):
   - D1: ST-4.1 live sampling of 30 companies (5 banks/NBFCs) per candidate, the 10-company manual annual-report check, the paid trial, and confirming or revising the provisional ADR-0005 choice.
-  - D2: live verification of every wire format (NSE/BSE bhavcopy and index files, corporate-action JSON, Yahoo chart, Stooq, EDGAR, FRED, NSE FII/DII, BSE/NSE announcements, FMP) and `live` record tests; all fixtures are hand-built from documentation and unverified.
+  - D2: live verification of the remaining wire formats (corporate-action JSON, Stooq, EDGAR, FRED, NSE FII/DII, BSE/NSE announcements, FMP) and `live` record tests; the NSE/BSE bhavcopy, NSE index file, Yahoo chart, NSE equity list, AMFI NAVAll and SEC tickers file were verified live on 2026-10-13 (#122). The NSE corporate-actions endpoint answers 404 and the BSE fundamentals API answers 403 from a plain client (follow-ups).
   - D3: ST-4.4 depth targets verified only on synthetic fixtures; Ind-AS XBRL tag mapping for bank fields (GNPA, NNPA, NIM, CASA, CAR) and shareholding/pledge unverified.
   - D4: model-backed news classifier (the `Classifier` Protocol and rule-based default exist) and the web-search news source.
   - D5: keyed estimate vendors beyond one FMP-shaped adapter (Intrinio), and an India estimates source (India is reported `available: false`).

@@ -124,7 +124,7 @@ class AmfiNavAll(Adapter):
         self._client = client or make_client(self.name)
 
     def _fetch(self, **params: Any) -> tuple[Any, datetime]:
-        resp = http_get(self._client, URLS["amfi"])
+        resp = http_get(self._client, URLS["amfi"], follow_redirects=True)
         if resp is None:
             raise SourceUnavailable("AMFI NAVAll is not available")
         return resp.text, utcnow()

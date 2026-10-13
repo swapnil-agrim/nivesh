@@ -33,9 +33,10 @@ own information, not investment advice.
 - **D4 Calendars (NFR-19).** India jobs use the NSE calendar (also BSE), US jobs the NYSE calendar,
   both from `nivesh_engine.calendar`. A year with no NSE holiday list raises `CalendarUnknown`: the
   job is skipped with the reason and **one** notice is sent per gap, never a guess from weekdays.
-  The shipped 2026 holiday list holds only 5 dates (lunar holidays are missing), so
-  `schedule status` warns while the list is shorter than `min_holidays_warn` (8) and India jobs may
-  run on an unlisted holiday until the owner completes it (X5).
+  The shipped holiday list covers 2024-2026 and is built in (united per year with the configured
+  `nse_holidays`), so a fresh install has data; from 2027 the owner extends it yearly. For a listed
+  year `schedule status` warns while the list is shorter than `min_holidays_warn` (8), and India jobs
+  may run on an unlisted holiday until the owner completes it (X5).
 - **D5 Grace, late and missed window.** A job later than `grace_minutes` is stored late and shown as
   LATE. A job later than its own `catchup_hours` (3 for the brief, 2 for the reminder, 15 for the
   Saturday jobs) is skipped as a **missed window** instead of run, so a laptop that wakes at 22:00

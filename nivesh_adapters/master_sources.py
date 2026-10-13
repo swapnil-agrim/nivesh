@@ -1,33 +1,42 @@
 """Security-master inputs (ST-4.8): NSE equity list, BSE scrip list, AMFI NAVAll, SEC tickers.
 
-Wire formats are per spec, unverified against live sources (follow-up D2). `_fetch` returns the
-raw text (JSON-native, cacheable); the `parse_*` functions build `MasterRow`s from it.
+Wire formats verified live on 2026-10-13: NSE `EQUITY_L.csv`, AMFI NAVAll (the portal host; the
+legacy host answers 302), SEC `company_tickers_exchange.json`. BSE publishes no public scrip-list
+file any more (`ListofScrips.csv` is 404, the API answers 403), so the BSE master is derived from
+the latest dated UDiFF bhavcopy (symbol, name, ISIN, scrip code; no industry). `_fetch` returns
+the raw text (JSON-native, cacheable); the `parse_*` functions build `MasterRow`s from it.
 """
 
 import csv
 import io
 import json
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import httpx
 
 from nivesh_adapters.base import Adapter
+from nivesh_adapters.prices_in import BSE_CSV
 from nivesh_adapters.quality import DataQualityError
 from nivesh_adapters.recorder import make_client
 from nivesh_core.errors import SourceUnavailable
 from nivesh_core.secrets import get_secret
 from nivesh_core.security_master import MasterRow
 from nivesh_core.security_resolver import US_EXCHANGE_ALIASES
-from nivesh_core.timeutil import utcnow
+from nivesh_core.timeutil import ist_date, utcnow
 
 URLS = {
     "nse": "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv",
-    "bse": "https://www.bseindia.com/downloads/Help/file/ListofScrips.csv",
-    "amfi": "https://www.amfiindia.com/spages/NAVAll.txt",
+    "bse": BSE_CSV,  # dated template: the latest bhavcopy within BSE_LOOKBACK_DAYS
+    "amfi": "https://portal.amfiindia.com/spages/NAVAll.txt",
     "sec": "https://www.sec.gov/files/company_tickers_exchange.json",
 }
 EQUITY_SERIES = {"EQ", "BE", "BZ", "SM", "ST"}
+BSE_LOOKBACK_DAYS = 10
+# BSE scrip groups dropped from the master. Live 2026-10-13 distribution: B, X, A, XT, M, T, MT,
+# Z, G, E, P, IF, MS, TS, ZP carry equities/ETFs/InvITs and stay; F (NCDs, bonds, AMC debt funds),
+# G (gilts), W (warrants) and R (rights) are not tradable equity.
+BSE_SKIP_GROUPS = {"F", "G", "W", "R"}
 SEC_EXCHANGES = {**US_EXCHANGE_ALIASES, "CBOE": "CBOE", "OTC": "OTC"}
 
 
@@ -77,15 +86,19 @@ def parse_nse(text: str) -> list[MasterRow]:
 
 
 def parse_bse(text: str) -> list[MasterRow]:
+    """BSE UDiFF bhavcopy rows as master rows: TckrSymb, FinInstrmNm, ISIN, FinInstrmId (code)."""
+    cols = ("FinInstrmId", "TckrSymb", "FinInstrmNm", "ISIN", "SctySrs")
     out = []
     for n, r in _rows("bse_scrips", text):
-        _need("bse_scrips", n, r, "Security Code", "Security Id", "Issuer Name", "ISIN No")
-        if r.get("Status", "Active") != "Active" or not r["ISIN No"] or not r["Security Id"]:
+        _need("bse_scrips", n, r, *cols)
+        if r["SctySrs"] in BSE_SKIP_GROUPS or not (
+            r["ISIN"] and r["TckrSymb"] and r["FinInstrmId"]
+        ):
             continue
         out.append(
             MasterRow(
-                symbol=r["Security Id"], exchange="BSE", name=r["Issuer Name"], isin=r["ISIN No"],
-                bse_code=r["Security Code"], industry=r.get("Industry") or None,
+                symbol=r["TckrSymb"], exchange="BSE", name=r["FinInstrmNm"], isin=r["ISIN"],
+                bse_code=r["FinInstrmId"],
             )
         )  # fmt: skip
     return out
@@ -164,13 +177,34 @@ class MasterSources(Adapter):
     name = "master_sources"
     source = "master_sources"
 
-    def __init__(self, client: httpx.Client | None = None) -> None:
+    def __init__(self, client: httpx.Client | None = None, today: date | None = None) -> None:
         self._client = client or make_client(self.name)
+        self._today = today  # injectable for tests; default is today's IST date
+
+    def _bse(self) -> str:
+        """Latest dated UDiFF bhavcopy, walking back over days with no file (404, weekends,
+        holidays) or a non-CSV 200 (the site serves an HTML page before the day's file exists)."""
+        today = self._today or ist_date(utcnow())
+        for back in range(BSE_LOOKBACK_DAYS):
+            url = BSE_CSV.format(d=(today - timedelta(days=back)).strftime("%Y%m%d"))
+            resp = self._client.get(
+                url, headers={"User-Agent": "nivesh/0.1"}, follow_redirects=True
+            )
+            if resp.status_code == 404:
+                continue
+            if resp.status_code != 200:
+                raise SourceUnavailable(f"bse master source returned HTTP {resp.status_code}")
+            if resp.text.startswith("TradDt"):
+                return resp.text
+        raise SourceUnavailable(f"no BSE bhavcopy in the last {BSE_LOOKBACK_DAYS} days")
 
     def _fetch(self, **params: Any) -> tuple[Any, datetime]:
         resource = params["resource"]
+        if resource == "bse":
+            return self._bse(), utcnow()
         headers = sec_headers() if resource == "sec" else {"User-Agent": "nivesh/0.1"}
-        resp = self._client.get(URLS[resource], headers=headers)
+        # a redirect must never carry the SEC contact User-Agent to another host
+        resp = self._client.get(URLS[resource], headers=headers, follow_redirects=resource != "sec")
         if resp.status_code != 200:
             raise SourceUnavailable(f"{resource} master source returned HTTP {resp.status_code}")
         return resp.text, utcnow()

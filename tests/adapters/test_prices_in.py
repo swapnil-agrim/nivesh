@@ -252,3 +252,92 @@ def test_bhavcopy_zip_bomb_is_refused() -> None:
             ip.fetch(resource="nse_bhavcopy", day="2026-01-05")
     finally:
         prices_in.MAX_UNZIPPED = old
+
+
+# Bad-row policy: validation is structural, row-level OHLC failures are counted, not fatal ------
+
+HEAD = text("nse_bhavcopy.csv").splitlines()[0]
+GOOD_REL = "2026-01-05,2026-01-05,CM,NSE,STK,2885,INE002A01018,RELIANCE,EQ,10,12,9,11,1,1,100"
+T0_BAD = "2026-01-05,2026-01-05,CM,NSE,STK,7,INEZZ,ZZBAD,T0,6.65,6.65,6.65,6.61,1,1,5"
+
+
+def _file(*rows: str) -> str:
+    return "\n".join([HEAD, *rows]) + "\n"
+
+
+def _day_client(body: str) -> httpx.Client:
+    return client(lambda r: httpx.Response(200, content=zipped(body)))
+
+
+def test_validate_payload_accepts_file_with_bad_ohlc_row_in_other_series() -> None:
+    ip = IndiaPrices(_day_client(_file(GOOD_REL, T0_BAD)))
+    data = ip.fetch(resource="nse_bhavcopy", day="2026-01-05").data
+    assert "ZZBAD" in data
+
+
+@pytest.mark.parametrize(
+    "body, why",
+    [
+        ("TradDt,TckrSymb,SctySrs\n2026-01-05,X,EQ\n", "missing column"),
+        (_file("05/01/2026,x,CM,NSE,STK,1,ISIN,TCS,EQ,10,12,9,11,1,1,100"), "bad date"),
+    ],
+)
+def test_validate_payload_still_rejects_structural_damage(body: str, why: str) -> None:
+    ip = IndiaPrices(_day_client(body))
+    with pytest.raises(DataQualityError, match=why):
+        ip.fetch(resource="nse_bhavcopy", day="2026-01-05")
+
+
+def test_validate_payload_rejects_index_file_without_columns() -> None:
+    ip = IndiaPrices(client(lambda r: httpx.Response(200, text="Index Name\nNifty 50\n")))
+    with pytest.raises(DataQualityError, match="missing column"):
+        ip.fetch(resource="indices", day="2026-01-05")
+
+
+def test_audit_counts_other_security_bad_rows_by_reason() -> None:
+    body = _file(GOOD_REL, T0_BAD)
+    audited = parse_bhavcopy(body, {"RELIANCE": 1}, key_col="TckrSymb", source="nse", audit=True)
+    assert [b.security_id for b in audited.bars] == [1]
+    assert dict(audited.bad_rows) == {"T0: outside the day's range": 1}
+    plain = parse_bhavcopy(body, {"RELIANCE": 1}, key_col="TckrSymb", source="nse")
+    assert not plain.bad_rows
+
+
+def test_audit_counts_unparseable_and_missing_close_in_other_rows_never_fatal() -> None:
+    abc = T0_BAD.replace("6.61,1,1,5", "abc,1,1,5").replace("ZZBAD", "ZZABC")
+    nocl = T0_BAD.replace("6.61,1,1,5", ",1,1,5").replace("ZZBAD", "ZZNOC")
+    parsed = parse_bhavcopy(
+        _file(GOOD_REL, abc, nocl), {"RELIANCE": 1}, key_col="TckrSymb", source="nse", audit=True
+    )
+    assert len(parsed.bars) == 1
+    assert dict(parsed.bad_rows) == {"T0: not a number": 1, "T0: missing close": 1}
+
+
+def test_requested_security_bad_eq_row_stays_fatal_with_audit() -> None:
+    bad = GOOD_REL.replace(",10,12,9,11,", ",10,12,9,13,")
+    with pytest.raises(DataQualityError, match="outside the day's range"):
+        parse_bhavcopy(_file(bad), {"RELIANCE": 1}, key_col="TckrSymb", source="nse", audit=True)
+
+
+def test_requested_security_own_t0_bad_row_is_not_fatal_and_not_counted() -> None:
+    own_t0 = T0_BAD.replace("ZZBAD", "RELIANCE")
+    parsed = parse_bhavcopy(
+        _file(GOOD_REL, own_t0), {"RELIANCE": 1}, key_col="TckrSymb", source="nse", audit=True
+    )
+    assert [b.close for b in parsed.bars] == [Decimal("11")]
+    assert not parsed.bad_rows
+
+
+def test_indices_audit_skips_other_index_bad_row_but_requested_is_fatal() -> None:
+    head = text("nse_indices.csv").splitlines()[0]
+    good = "Nifty 50,05-01-2026,1,3,1,2,-,0,0,-"
+    head_cols = head.count(",") + 1
+    assert head_cols >= 7
+    bad = "Nifty Bank,05-01-2026,5,6,5,9,-,0,0,-"
+    cut = lambda row: ",".join(row.split(",")[:head_cols])  # noqa: E731
+    body = "\n".join([head, cut(good), cut(bad)]) + "\n"
+    parsed = parse_indices(body, {"NIFTY 50": 1}, audit=True)
+    assert len(parsed.bars) == 1
+    assert dict(parsed.bad_rows) == {"index: outside the day's range": 1}
+    with pytest.raises(DataQualityError, match="outside the day's range"):
+        parse_indices(body, {"NIFTY BANK": 2}, audit=True)

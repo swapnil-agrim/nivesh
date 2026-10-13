@@ -11,6 +11,7 @@ from nivesh_core.agents_config import AgentsSettings
 from nivesh_core.analysis_config import AnalysisSettings
 from nivesh_core.delivery_config import DeliverySettings
 from nivesh_core.errors import ConfigError
+from nivesh_core.nse_holidays import merged_nse_holidays
 from nivesh_core.report_config import ReportSettings
 from nivesh_core.review_config import ReviewSettings
 from nivesh_core.scoring_config import EvaluationSettings, ScoringSettings
@@ -120,7 +121,7 @@ class FeedSpec(BaseModel):
 
 
 class MarketSettings(BaseModel):
-    """E4 market data. Wire details and series ids are per spec, unverified against live sources."""
+    """E4 market data. Series ids are per spec, unverified; wire formats in prices_in verified."""
 
     model_config = ConfigDict(extra="forbid")
     edgar_max_per_sec: float = Field(default=8, ge=1, le=10)  # SEC fair-access limit is 10
@@ -146,6 +147,10 @@ class MarketSettings(BaseModel):
         if not REF_RE.match(v):
             raise ValueError("must be a reference such as 'ref:NAME'")
         return v
+
+    def effective_nse_holidays(self) -> dict[int, frozenset[date]]:
+        """Built-in lists (2024-2026) united per year with the configured `nse_holidays`."""
+        return merged_nse_holidays(self.nse_holidays)
 
     @field_validator("nse_holidays")
     @classmethod
