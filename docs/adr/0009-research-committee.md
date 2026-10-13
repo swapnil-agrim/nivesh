@@ -132,8 +132,9 @@ the live CLI (listed below), and correctness never depends on them. Nothing here
   debate and no lenses; its card coverage counts as 100, there are no red flags, and the veto
   facts are exclusions and the position limit only. The fund path is first on the scope cut list.
 - **Digests** in the trace and the snapshot are written in groups of eight hex digits joined by
-  hyphens, because a plain SHA-256 can hold nine or more decimal digits in a row, which the PII
-  scanner reports.
+  dots, because a plain SHA-256 can hold nine or more decimal digits in a row, which the PII
+  scanner reports. (They were first joined by hyphens; a group ending in five digits followed by
+  one starting with five read as a phone number, so the joiner became a dot in #123.)
 
 ## Unverified against the live SDK (offline only)
 `output_format` JSON Schema subset and its failure subtype; structured output together with tool

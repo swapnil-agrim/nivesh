@@ -13,6 +13,7 @@ from nivesh_engine.valuation import (
     valuation_multiples,
     valuation_range,
 )
+from tests import tapetide_fx as tx
 from tests.analysis_fx import annual_rows, month_ends, quarter_rows, strow
 
 D = Decimal
@@ -329,3 +330,52 @@ def test_valuation_is_deterministic() -> None:
     assert valuation_range(inp, cfg=CFG) == valuation_range(inp, cfg=CFG)
     for r in a.multiples.values():
         assert r.current.value is None or isinstance(r.current.value, Decimal)
+
+
+# ---- India on the recorded Tapetide statements --------------------------------------------------
+INDIA_ASOF = tx.TODAY
+INDIA_CLOSE = (date(2026, 10, 9), D("1500"))
+
+
+def india_inputs(company: str, kind: str = "general") -> ValuationInputs:
+    return ValuationInputs(
+        "IN", kind, INDIA_ASOF, tuple(tx.recorded_rows(company)), (), INDIA_CLOSE
+    )
+
+
+def test_india_pe_uses_ttm_eps_from_four_quarters_and_pb_uses_the_derived_share_count() -> None:
+    got = current_multiples(india_inputs("RELIANCE"))
+    ttm_eps = D("13.42") + D("13.78") + D("12.54") + D("15.48")
+    close(got["pe"], str(D(1500) / ttm_eps), D("0.0001"))
+    assert got["pe"].inputs["eps_basis"] == "ttm"
+    shares = D("13532000000")
+    equity = D(13532 + 890498) * 10**7
+    close(got["pb"], str(D(1500) * shares / equity), D("0.0001"))
+    na_with(got["ev_ebitda"], "profit before tax")
+
+
+def test_india_fcf_yield_and_dcf_range_on_reliance_use_tapetide_free_cash_flow() -> None:
+    inp = india_inputs("RELIANCE")
+    fcf = D(192113 - 122090) * 10**7
+    cap = D(1500) * D("13532000000")
+    close(current_multiples(inp)["fcf_yield_pct"], str(fcf / cap * 100), D("0.0001"))
+    rng = valuation_range(inp, cfg=CFG)
+    assert rng.cash_flow.available and rng.cash_flow.inputs["basis"] == "fcf"
+    close(rng.cash_flow, str(fcf), D("1"))
+    assert all(sc.per_share.available for sc in rng.scenarios.values())
+    assert rng.implied_growth.available or rng.implied_growth.reason
+
+
+def test_india_bank_dcf_uses_net_income_and_has_no_fcf_yield() -> None:
+    inp = india_inputs("HDFCBANK", "financial")
+    na_with(current_multiples(inp)["fcf_yield_pct"], "financials")
+    rng = valuation_range(inp, cfg=CFG)
+    assert rng.cash_flow.available and rng.cash_flow.inputs["basis"] == "earnings"
+    close(rng.cash_flow, str(D(79219) * 10**7), D("1"))  # includes minority interest (ADR-0015)
+    assert rng.scenarios["base"].per_share.available
+
+
+def test_india_pb_history_is_unavailable_before_the_first_filed_share_count() -> None:
+    rows = [r for r in tx.recorded_rows("RELIANCE") if r.item != "shares_out"]
+    inp = ValuationInputs("IN", "general", INDIA_ASOF, tuple(rows), (), INDIA_CLOSE)
+    na_with(current_multiples(inp)["pb"], "shares_out")

@@ -64,3 +64,5 @@ ratios given to two decimals. Report the mismatch rate per candidate and per fie
 The NSE/BSE XBRL tag names, the shareholding-pattern JSON shape and the exchange endpoints are
 per spec and unverified against live sources (deferred D2/D3). The parsers fail loudly with
 `DataQualityError` on shapes they do not expect, so a wrong guess never becomes silent bad data.
+
+Update (2026-10-13): superseded as to the India source by ADR-0015 (Tapetide free tier is the primary, keyed on the NSE symbol; this BSE XBRL path is a fallback only, and the exchange endpoint answers HTTP 403 today).

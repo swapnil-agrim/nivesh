@@ -38,6 +38,18 @@ from nivesh_adapters.fundamentals_in import (
     parse_shareholding,
     prefer_consolidated,
 )
+from nivesh_adapters.fundamentals_tapetide import (
+    SECTIONS as TAPETIDE_SECTIONS,
+)
+from nivesh_adapters.fundamentals_tapetide import (
+    SOURCE_ESTIMATED,
+    Statements,
+    TapetideFundamentals,
+    face_value_of,
+    map_shareholding,
+    map_statements,
+    scrub_text,
+)
 from nivesh_adapters.macro import MacroFetch, parse_flows, parse_fred
 from nivesh_adapters.news import (
     Feeds,
@@ -58,7 +70,7 @@ from nivesh_adapters.prices_us import UsPrices, parse_stooq
 from nivesh_adapters.quality import DataQualityError
 from nivesh_core.config import Settings
 from nivesh_core.errors import NiveshError, SecretNotFound
-from nivesh_core.market_models import CorpAction, PriceBar
+from nivesh_core.market_models import CorpAction, PriceBar, ShareholdingRow
 from nivesh_core.market_store import (
     NewsRow,
     bars_by_source,
@@ -81,6 +93,7 @@ from nivesh_engine.adjust import adjust_closes, cross_check
 from nivesh_engine.calendar import Calendar, find_gaps
 from nivesh_engine.classify import Classifier, RuleClassifier, classify_item
 from nivesh_engine.dedupe import Item, dedupe
+from nivesh_engine.statements import StatementRow
 
 SPLIT_ADJUSTED = {"yahoo", "stooq"}  # closes already split-adjusted at the source
 INDIA_YAHOO_INDEX = {
@@ -102,23 +115,36 @@ class Run:
     failed: list[str] = field(default_factory=list)
 
     def get(
-        self, adapter: Adapter, params: dict[str, Any], data_type: str, label: str = ""
+        self,
+        adapter: Adapter,
+        params: dict[str, Any],
+        data_type: str,
+        label: str = "",
+        *,
+        soft: bool = False,
     ) -> Any | None:
-        """Cached fetch; a source failure is recorded and gives None (bad data still raises)."""
+        """Cached fetch; a source failure is recorded and gives None. Bad data still raises,
+        unless `soft`: then it too is a recorded failure (and, as always, is never cached)."""
         try:
             res = cached_fetch(
                 adapter, params, data_type, conn=self.duck, ttls=self.settings.ttls,
                 refresh=self.refresh, redact=False,
             )  # fmt: skip
-        except DataQualityError:
-            raise
+        except DataQualityError as e:
+            if not soft:
+                raise
+            self._fail(params, label, f"bad {e.field} ({e.reason})"[:200])
+            return None
         except (NiveshError, httpx.HTTPError) as e:
-            keys = ("day", "symbol", "scrip", "series_id")
-            what = label or next((params[k] for k in keys if params.get(k)), "")
-            self.failed.append(f"{params['resource']} {what}: {e}".replace("  ", " "))
+            self._fail(params, label, str(e))
             return None
         self.stale |= res.stale
         return res.data
+
+    def _fail(self, params: dict[str, Any], label: str, why: str) -> None:
+        keys = ("day", "symbol", "scrip", "series_id")
+        what = label or next((params[k] for k in keys if params.get(k)), "")
+        self.failed.append(f"{params['resource']} {what}: {why}".replace("  ", " "))
 
 
 @dataclass
@@ -275,6 +301,10 @@ class FundamentalsReport:
     skipped: list[str] = field(default_factory=list)
     stale: bool = False
     failed: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    estimated_rows: int = 0
+    clamped_rows: int = 0
+    tapetide_calls: int | None = None
 
 
 @dataclass
@@ -287,9 +317,11 @@ class FilingsReport:
     failed: list[str] = field(default_factory=list)
 
 
-def _count(duck: duckdb.DuckDBPyConnection, table: str, sid: int) -> int:
-    row = duck.execute(f"SELECT count(*) FROM {table} WHERE security_id = ?", (sid,)).fetchone()  # noqa: S608
-    return int(row[0]) if row else 0
+def _keys(duck: duckdb.DuckDBPyConnection, sid: int) -> set[tuple[Any, ...]]:
+    return set(duck.execute(
+        "SELECT period_end, period_type, item, source, filed_at FROM fundamental "
+        "WHERE security_id = ?", (sid,),
+    ).fetchall())  # fmt: skip
 
 
 def _depth(duck: duckdb.DuckDBPyConnection, sid: int) -> tuple[int, int]:
@@ -303,6 +335,152 @@ def _depth(duck: duckdb.DuckDBPyConnection, sid: int) -> tuple[int, int]:
 MAX_RESULT_FILINGS = 32  # about eight years of quarterly results
 
 
+def _dedupe_tail(lines: list[str], start: int) -> None:
+    """Collapse failures added since `start` that carry the same reason (a halted source repeats
+    its reason for every remaining call)."""
+    seen: set[str] = set()
+    kept = []
+    for line in lines[start:]:
+        reason = line.split(": ", 1)[-1]
+        if reason not in seen:
+            seen.add(reason)
+            kept.append(line)
+    lines[start:] = kept
+
+
+def _minority_note(rows: list[StatementRow]) -> str | None:
+    """Net income against EPS x shares at the share-count period: Tapetide's Net Profit includes
+    minority interest, EPS is the parent's, so a gap above 3% is disclosed (the comparison is
+    approximate: weighted EPS against period-end shares)."""
+    shares = [r for r in rows if r.item == "shares_out"]
+    if not shares:
+        return None
+    end = max(r.period_end for r in shares)
+    at = {r.item: r.value for r in rows if r.period_end == end and r.period_type == "A"}
+    ni, eps = at.get("net_income"), at.get("eps")
+    attributable = None if eps is None else eps * at["shares_out"]
+    if not ni or not attributable or attributable <= 0:
+        return None
+    gap = (ni - attributable) / attributable * 100
+    if abs(gap) <= 3:
+        return None
+    return (
+        f"net income includes minority interest (Tapetide Net Profit, {gap:.1f}% above EPS x "
+        "shares for the latest year); EPS-based figures are attributable to the parent"
+    )
+
+
+_MAPPING_ERRORS = (ArithmeticError, ValueError, TypeError)  # InvalidOperation is an ArithmeticError
+
+
+def _tapetide_statements(
+    run: Run, ta: TapetideFundamentals, sym: str, rep: FundamentalsReport, today: date
+) -> tuple[Statements, list[ShareholdingRow]]:
+    start = len(run.failed)
+    got: dict[str, Any] = {}
+    for section in TAPETIDE_SECTIONS:
+        params = {"resource": "financials", "symbol": sym, "section": section}
+        doc = run.get(ta, params, "fundamentals", f"{sym} {section}", soft=True)
+        if doc is not None:
+            got[section] = doc
+    snapshot = holding = None
+    if got:  # a face value and the shareholding are worth a call only when statements exist
+        snapshot = run.get(ta, {"resource": "financials", "symbol": sym, "section": "snapshot"},
+                           "fundamentals", f"{sym} snapshot", soft=True)  # fmt: skip
+        holding = run.get(ta, {"resource": "shareholding", "symbol": sym}, "fundamentals",
+                          f"{sym} shareholding", soft=True)  # fmt: skip
+    _dedupe_tail(run.failed, start)
+    try:
+        mapped = map_statements(got, face_value_of(snapshot), today)
+    except _MAPPING_ERRORS as e:
+        run.failed.append(f"fundamentals {sym} statements: unusable Tapetide data ({e})"[:200])
+        mapped = Statements()
+    rep.skipped = mapped.skipped
+    rep.tapetide_calls = ta.calls
+    if got and len(got) < len(TAPETIDE_SECTIONS):
+        rep.notes.append("missing Tapetide sections: " + ", ".join(
+            s for s in TAPETIDE_SECTIONS if s not in got))  # fmt: skip
+    shares: list[ShareholdingRow] = []
+    if holding is not None:
+        try:
+            hm = map_shareholding(holding, today)
+            shares, rep.clamped_rows = hm.rows, rep.clamped_rows + hm.clamped
+            rep.skipped = [*rep.skipped, *hm.skipped]
+        except _MAPPING_ERRORS as e:
+            run.failed.append(f"fundamentals {sym} shareholding: unusable data ({e})"[:200])
+    return mapped, shares
+
+
+def _india_fundamentals(
+    run: Run,
+    master: SecurityMaster,
+    sec: SecurityRow,
+    rep: FundamentalsReport,
+    ta: TapetideFundamentals,
+    india: Callable[[], IndiaFundamentals],
+    today: date,
+) -> None:
+    """Tapetide first (keyed on the NSE symbol); the BSE XBRL path only when Tapetide produced no
+    statements and the security has a BSE scrip code. Every failure is a reported reason."""
+    mapped, holding = _tapetide_statements(run, ta, sec.symbol, rep, today)
+    if mapped.reported or mapped.estimated:
+        rep.clamped_rows += mapped.clamped
+        rep.estimated_rows = len(mapped.estimated)
+        total = len(mapped.reported) + len(mapped.estimated)
+        if rep.estimated_rows:
+            rep.notes.append(
+                f"{rep.estimated_rows} of {total} rows carry an estimated filing date "
+                "(history before about Sep 2024 is approximate)"
+            )
+        if rep.clamped_rows:
+            rep.notes.append(f"{rep.clamped_rows} filing dates after today were set to today")
+        note = _minority_note([*mapped.reported, *mapped.estimated])
+        if note:
+            rep.notes.append(note)
+        if mapped.early:
+            rep.notes.append(
+                f"{len(mapped.early)} filing dates before the period end were set to the period "
+                f"end ({', '.join(mapped.early[:5])}{', ...' if len(mapped.early) > 5 else ''})"
+            )
+        try:  # one transaction: a failure leaves nothing written
+            write_fundamentals(
+                run.duck, sec.id, mapped.reported, ta.source, shareholding=holding,
+                shareholding_source=SOURCE_ESTIMATED, more=[(SOURCE_ESTIMATED, mapped.estimated)],
+                supersede=SOURCE_ESTIMATED,
+            )  # fmt: skip
+        except (*_MAPPING_ERRORS, duckdb.ConversionException) as e:
+            run.failed.append(f"fundamentals {sec.symbol}: could not store data ({e})"[:200])
+            return
+        rep.shareholding = len(get_shareholding(run.duck, sec.id))
+        return
+    code = master.alias_of(sec.id, "bse_code")
+    if code is None:
+        run.failed.append(
+            f"fundamentals {sec.symbol}: no Tapetide statements and no BSE scrip code for the "
+            "fallback; run `nivesh master build`"
+        )
+        return
+    fi = india()
+    index = run.get(fi, {"resource": "results_index", "scrip": code}, "fundamentals")
+    filings = []
+    for item in sorted(index or [], key=lambda i: i["period_end"], reverse=True)[
+        :MAX_RESULT_FILINGS
+    ]:
+        doc = run.get(
+            fi,
+            {"resource": "results_xbrl", "url": item["xbrl_url"], "filed_at": item["filed_at"]},
+            "fundamentals",
+        )
+        if doc is not None:
+            filings.append(parse_results_xbrl(doc["xml"], date.fromisoformat(doc["filed_at"])))
+    rows, _basis = prefer_consolidated(filings)
+    rep.skipped += [s for f in filings for s in f.skipped]
+    raw = run.get(fi, {"resource": "shareholding", "scrip": code}, "fundamentals")
+    bse_holding = parse_shareholding(raw) if raw is not None else []
+    write_fundamentals(run.duck, sec.id, rows, fi.source, shareholding=bse_holding)
+    rep.shareholding = len(get_shareholding(run.duck, sec.id))
+
+
 def ingest_fundamentals(
     duck: duckdb.DuckDBPyConnection,
     sql: sqlite3.Connection,
@@ -312,6 +490,8 @@ def ingest_fundamentals(
     refresh: bool = False,
     edgar: Callable[[], Edgar] | None = None,
     india: Callable[[], IndiaFundamentals] = IndiaFundamentals,
+    tapetide: Callable[[], TapetideFundamentals] = TapetideFundamentals,
+    today: date | None = None,
 ) -> FundamentalsReport:
     """Fetch and store standardised statements (and India shareholding) for one security.
     Append-only by `filed_at`; all rows land in one transaction."""
@@ -321,7 +501,7 @@ def ingest_fundamentals(
     run = Run(duck, settings, refresh)
     master = SecurityMaster(sql)
     rep = FundamentalsReport(sec.id, sec.symbol)
-    before = _count(duck, "fundamental", sec.id)
+    before = _keys(duck, sec.id)
     if sec.market == "US":
         cik = resolve_cik(master, sec.id)
         ed = (edgar or (lambda: Edgar(max_per_sec=settings.market.edgar_max_per_sec)))()
@@ -331,31 +511,12 @@ def ingest_fundamentals(
             rep.skipped = q.skipped
             write_fundamentals(duck, sec.id, q.rows, ed.source)
     else:
-        code = master.alias_of(sec.id, "bse_code")
-        if code is None:
-            raise NiveshError(f"{sec.symbol} has no BSE scrip code; run `nivesh master build`")
-        fi = india()
-        index = run.get(fi, {"resource": "results_index", "scrip": code}, "fundamentals")
-        filings = []
-        for item in sorted(index or [], key=lambda i: i["period_end"], reverse=True)[
-            :MAX_RESULT_FILINGS
-        ]:
-            doc = run.get(
-                fi,
-                {"resource": "results_xbrl", "url": item["xbrl_url"], "filed_at": item["filed_at"]},
-                "fundamentals",
-            )
-            if doc is not None:
-                filings.append(parse_results_xbrl(doc["xml"], date.fromisoformat(doc["filed_at"])))
-        rows, _basis = prefer_consolidated(filings)
-        rep.skipped = [s for f in filings for s in f.skipped]
-        raw = run.get(fi, {"resource": "shareholding", "scrip": code}, "fundamentals")
-        holding = parse_shareholding(raw) if raw is not None else []
-        write_fundamentals(duck, sec.id, rows, fi.source, shareholding=holding)
-        rep.shareholding = len(get_shareholding(duck, sec.id))
-    rep.rows = _count(duck, "fundamental", sec.id) - before
+        _india_fundamentals(run, master, sec, rep, tapetide(), india, today or utcnow().date())
+    rep.rows = len(_keys(duck, sec.id) - before)  # inserted, not net of superseded estimates
     rep.annual_periods, rep.quarterly_periods = _depth(duck, sec.id)
-    rep.stale, rep.failed = run.stale, run.failed
+    rep.stale, rep.failed = run.stale, [scrub_text(f) for f in run.failed]
+    rep.skipped = [scrub_text(s) for s in rep.skipped]
+    rep.notes = [scrub_text(n) for n in rep.notes]
     return rep
 
 

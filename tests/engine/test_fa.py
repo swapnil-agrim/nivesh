@@ -12,6 +12,7 @@ from nivesh_engine.statements import (
     facts_from_companyfacts,
     quarterise,
 )
+from tests import tapetide_fx as tx
 from tests.analysis_fx import annual_rows, share_rows, strow
 
 D = Decimal
@@ -340,7 +341,7 @@ def test_coverage_pct_counts_available_over_applicable_metrics() -> None:
     assert thin.coverage_pct is not None and thin.coverage_pct < res.coverage_pct
 
 
-def test_india_ebit_based_and_cash_metrics_unavailable_pbt_never_used_as_ebit() -> None:
+def test_india_ebit_based_metrics_unavailable_pbt_never_used_as_ebit() -> None:
     book: dict[str, list[str | int]] = {
         "revenue": [1000], "operating_income": [150], "net_income": [100],
         "depreciation_amortization": [50], "interest_expense": [25], "cfo": [130],
@@ -351,11 +352,73 @@ def test_india_ebit_based_and_cash_metrics_unavailable_pbt_never_used_as_ebit() 
     for name in ("operating_margin_pct", "ebitda_margin_pct", "roic_pct", "roce_pct",
                  "net_debt_ebitda", "interest_cover"):  # fmt: skip
         unavailable(res, name, "profit before tax")
-    for name in ("current_ratio", "cfo_to_pat", "fcf_margin_pct", "accruals_ratio_pct",
-                 "working_capital_days"):  # fmt: skip
-        unavailable(res, name, "india")
     is_close(res, "net_margin_pct", "10")
     is_close(res, "debt_equity", "0.363636363636")
+
+
+def test_india_cfo_to_pat_and_fcf_margin_use_rows_when_present() -> None:
+    book: dict[str, list[str | int]] = {
+        "revenue": [1000], "net_income": [100], "cfo": [130], "capex": [40],
+        "total_assets": [1000], "total_equity": [450, 550],
+    }  # fmt: skip
+    res = run(annual_rows(book, currency="INR"), market="IN")
+    is_close(res, "cfo_to_pat", "1.3")
+    is_close(res, "fcf_margin_pct", "9")
+    is_close(res, "accruals_ratio_pct", "-3")
+
+
+def test_india_gaps_say_which_item_is_missing_when_absent() -> None:
+    book: dict[str, list[str | int]] = {"revenue": [1000], "net_income": [100]}
+    res = run(annual_rows(book, currency="INR"), market="IN")
+    unavailable(res, "cfo_to_pat", "no cfo")
+    unavailable(res, "fcf_margin_pct", "no cfo, capex")
+    unavailable(res, "current_ratio", "no current_assets")
+    unavailable(res, "working_capital_days", "needs receivable")
+
+
+def test_deposits_or_financing_profit_row_makes_company_financial() -> None:
+    plain = annual_rows({"revenue": [1000]}, currency="INR")
+    assert sector_kind_of(None, plain, CFG) == "general"
+    deposits = [strow("deposits", "5000", date(2024, 3, 31), currency="INR")]
+    assert sector_kind_of(None, deposits, CFG) == "financial"
+    nbfc = [strow("financing_profit", "50", date(2024, 3, 31), currency="INR")]
+    assert sector_kind_of(None, nbfc, CFG) == "financial"
+    assert sector_kind_of("Energy", deposits, CFG) == "financial"
+
+
+# ---- India end to end on the recorded Tapetide statements ---------------------------------------
+INDIA_ASOF = tx.TODAY
+
+
+def recorded(company: str, kind: str = "general") -> FaResult:
+    return run(tx.recorded_rows(company), shareholding=tx.recorded_shareholding(),
+               as_of=INDIA_ASOF, kind=kind, market="IN")  # fmt: skip
+
+
+def test_reliance_recorded_rows_give_growth_margin_roe_leverage_and_pledge() -> None:
+    sections = tx.recorded_sections("RELIANCE")
+    sales = sections["profit_loss"]["data"]["Sales"]
+    want = ((D(sales["Mar 2026"]) / D(sales["Mar 2023"])) ** (D(1) / 3) - 1) * 100
+    res = recorded("RELIANCE")
+    assert res.sector_kind == "general"
+    is_close(res, "revenue_cagr_3y_pct", str(want), D("0.0001"))
+    is_close(res, "net_margin_pct", str(D(95754) / D(1055780) * 100), D("0.0001"))
+    assert get(res, "roe_pct").available
+    is_close(res, "debt_equity", str(D(402962) / D(13532 + 890498)), D("0.0001"))
+    unavailable(res, "operating_margin_pct", "profit before tax")
+    is_close(res, "promoter_pledged_pct", "0")
+    is_close(res, "cfo_to_pat", str(D(192113) / D(95754)), D("0.0001"))
+    is_close(res, "fcf_margin_pct", str(D(192113 - 122090) / D(1055780) * 100), D("0.0001"))
+    unavailable(res, "current_ratio", "current_assets")
+
+
+def test_hdfcbank_recorded_rows_are_financial_with_honest_asset_quality_gaps() -> None:
+    rows = tx.recorded_rows("HDFCBANK")
+    assert sector_kind_of(None, rows, CFG) == "financial"
+    res = recorded("HDFCBANK", kind="financial")
+    for name in ("gnpa_pct", "nnpa_pct", "nim_pct", "casa_pct", "car_pct"):
+        unavailable(res, name, "no ")
+    assert get(res, "net_margin_pct").available and "debt_equity" not in res.metrics
 
 
 def test_zero_denominator_is_unavailable_never_zero() -> None:

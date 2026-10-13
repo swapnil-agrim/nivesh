@@ -14,6 +14,8 @@ from nivesh_adapters.prices_us import UsPrices
 from nivesh_cli.main import app
 from nivesh_core.pii_scan import scan_text
 from tests import pii_values as pv
+from tests import tapetide_fx as tx
+from tests.conftest import MemoryKeyring
 from tests.market_fx import Feed
 
 FX = Path(__file__).resolve().parents[1] / "fixtures" / "market"
@@ -248,7 +250,16 @@ def test_market_prices_output_has_no_pii(cli_env: Env, prices: Feed) -> None:
 
 
 @pytest.fixture
-def funds(cli_env: Env, net: Net, monkeypatch: pytest.MonkeyPatch) -> None:
+def tape(monkeypatch: pytest.MonkeyPatch) -> tx.Tapetide:
+    """Tapetide served from the recorded fixtures, with a (test) token set."""
+    srv = tx.Tapetide()
+    monkeypatch.setenv("TAPETIDE_TOKEN", tx.token())
+    monkeypatch.setattr(cm, "_tapetide", lambda: tx.adapter(srv))
+    return srv
+
+
+@pytest.fixture
+def funds(cli_env: Env, net: Net, tape: tx.Tapetide, monkeypatch: pytest.MonkeyPatch) -> None:
     import json
 
     from nivesh_adapters.edgar import Edgar, RateLimiter
@@ -306,7 +317,44 @@ def test_market_fundamentals_shares_one_edgar_limiter_per_run(
 def test_market_fundamentals_india_prints_shareholding(cli_env: Env, funds: None) -> None:
     r = runner.invoke(app, [*cli_env[0], "market", "fundamentals", "RELIANCE"])
     assert r.exit_code == 0, r.output
-    assert "shareholding quarters 3" in r.output and "filings:" not in r.output
+    assert "shareholding quarters 8" in r.output and "filings:" not in r.output
+
+
+def test_market_fundamentals_india_prints_tapetide_counts_notes_and_quota(
+    cli_env: Env, funds: None, tape: tx.Tapetide
+) -> None:
+    r = runner.invoke(app, [*cli_env[0], "market", "fundamentals", "RELIANCE"])
+    assert r.exit_code == 0, r.output
+    assert "annual periods 12, quarterly periods 13" in r.output
+    assert "estimated filing dates:" in r.output and "minority interest" in r.output
+    assert "Tapetide calls this run: 6 (free plan 50/day, resets 00:00 IST)" in r.output
+    assert tape.calls == 6 and tx.token() not in r.output and scan_text(r.output) == []
+    again = runner.invoke(app, [*cli_env[0], "market", "fundamentals", "RELIANCE"])
+    assert "Tapetide calls this run: 0" in again.output and tape.calls == 6  # cached
+
+
+def test_market_fundamentals_india_without_token_degrades_with_the_setup_hint(
+    cli_env: Env,
+    funds: None,
+    tape: tx.Tapetide,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_keyring: MemoryKeyring,
+) -> None:
+    monkeypatch.delenv("TAPETIDE_TOKEN")
+    r = runner.invoke(app, [*cli_env[0], "market", "fundamentals", "RELIANCE"])
+    assert r.exit_code == 0, r.output  # degrades like a missing EDGAR_CONTACT
+    assert "nivesh secrets set TAPETIDE_TOKEN" in r.output and tape.calls == 0
+    assert "shareholding quarters 3" in r.output  # the BSE fallback still ran
+
+
+def test_market_fundamentals_india_scrubs_a_token_echoed_by_the_vendor(
+    cli_env: Env, funds: None, tape: tx.Tapetide
+) -> None:
+    echo = f"Error: bad credential {tx.token()} supplied"
+    tape.fail_all = httpx.Response(200, json=tx.envelope(echo, is_error=True))
+    r = runner.invoke(app, [*cli_env[0], "market", "fundamentals", "RELIANCE"])
+    assert r.exit_code == 0, r.output
+    assert "Tapetide error" in r.output and tx.token() not in r.output
 
 
 def test_cli_unknown_security_lists_candidates_exit_1(cli_env: Env, funds: None) -> None:
@@ -458,3 +506,23 @@ def test_market_prices_bad_rows_reasons_capped_at_five_with_remainder(
     assert r.exit_code == 0, r.output
     line = next(x for x in r.output.splitlines() if x.startswith("bad rows skipped: 7"))
     assert line.count(" x1") == 5 and line.endswith("and 2 more)")
+
+
+def test_market_fundamentals_india_token_with_newline_and_transport_error_never_printed(
+    cli_env: Env, funds: None, tape: tx.Tapetide, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(req: httpx.Request) -> httpx.Response:
+        raise httpx.LocalProtocolError(f"Illegal header value b'Bearer {tx.token()}\\x07'")
+
+    good = cm._tapetide
+    monkeypatch.setattr(cm, "_tapetide", lambda: tx.adapter(boom))
+    monkeypatch.setenv("TAPETIDE_TOKEN", tx.token() + "\x07")
+    bad = runner.invoke(app, [*cli_env[0], "market", "fundamentals", "RELIANCE"])
+    assert bad.exit_code == 0, bad.output
+    assert "failed source" in bad.output and tx.token() not in bad.output
+
+    monkeypatch.setattr(cm, "_tapetide", good)
+    monkeypatch.setenv("TAPETIDE_TOKEN", tx.token() + "\n")
+    ok = runner.invoke(app, [*cli_env[0], "market", "fundamentals", "RELIANCE"])
+    assert ok.exit_code == 0, ok.output
+    assert tx.token() not in ok.output and "failed source fundamentals" not in ok.output

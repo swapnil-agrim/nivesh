@@ -1,0 +1,121 @@
+{
+ "_comment": "tapetide_misc: recorded envelopes (shareholding, errors) plus snapshots. snapshot_reliance is the trimmed observed top_ratios section; every synthetic_snapshot_* entry is SYNTHETIC (hand-built from the known face value, not recorded). Trimmed public figures for tests only; vendor terms forbid redistribution. The shareholding envelope keeps the real 'No. of Shareholders' count row (values in the millions), which must not be treated as a percentage.",
+ "shareholding": {
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"data\":[{\"period_type\":\"quarterly\",\"periods\":[\"Sep 2024\",\"Dec 2024\",\"Mar 2025\",\"Jun 2025\",\"Sep 2025\",\"Dec 2025\",\"Mar 2026\",\"Jun 2026\"],\"row_order\":[\"Promoters\",\"FIIs\",\"DIIs\",\"Government\",\"Public\",\"Others\",\"No. of Shareholders\"],\"data\":{\"DIIs\":{\"Dec 2024\":19.02,\"Dec 2025\":20.11,\"Jun 2025\":19.73,\"Jun 2026\":21.12,\"Mar 2025\":19.38,\"Mar 2026\":20.48,\"Sep 2024\":17.68,\"Sep 2025\":20.26},\"FIIs\":{\"Dec 2024\":19.15,\"Dec 2025\":19.09,\"Jun 2025\":19.21,\"Jun 2026\":17.2,\"Mar 2025\":19.06,\"Mar 2026\":18.67,\"Sep 2024\":21.29,\"Sep 2025\":18.65},\"Government\":{\"Dec 2024\":0.18,\"Dec 2025\":0.17,\"Jun 2025\":0.17,\"Jun 2026\":0.17,\"Mar 2025\":0.17,\"Mar 2026\":0.17,\"Sep 2024\":0.12,\"Sep 2025\":0.17},\"No. of Shareholders\":{\"Dec 2024\":4714960,\"Dec 2025\":4206160,\"Jun 2025\":4435760,\"Jun 2026\":4651860,\"Mar 2025\":4765730,\"Mar 2026\":4421290,\"Sep 2024\":3834970,\"Sep 2025\":4393760},\"Others\":{\"Dec 2024\":2.5,\"Dec 2025\":2.36,\"Jun 2025\":2.35,\"Jun 2026\":2.46,\"Mar 2025\":2.42,\"Mar 2026\":2.33,\"Sep 2024\":2.09,\"Sep 2025\":2.41},\"Promoters\":{\"Dec 2024\":50.13,\"Dec 2025\":50.01,\"Jun 2025\":50.07,\"Jun 2026\":50.48,\"Mar 2025\":50.11,\"Mar 2026\":50,\"Sep 2024\":50.24,\"Sep 2025\":50.01},\"Public\":{\"Dec 2024\":9.01,\"Dec 2025\":8.27,\"Jun 2025\":8.48,\"Jun 2026\":8.58,\"Mar 2025\":8.86,\"Mar 2026\":8.36,\"Sep 2024\":8.58,\"Sep 2025\":8.5}}}],\"meta\":{\"count\":1,\"source\":\"primary\"},\"promoter_pledge\":{\"as_of\":\"Jun 2026\",\"as_of_date\":\"2026-06-30\",\"label\":null,\"pct_of_promoter_holding\":0,\"pct_of_total_shares\":1.39,\"source\":\"primary\",\"status\":\"none\",\"unpledged_promoter_pct\":null}}"
+    }
+   ]
+  }
+ },
+ "pledge": {
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\n  \"data\": {\n    \"symbol\": \"RELIANCE\",\n    \"available\": true,\n    \"latest_pledged_pct_of_promoter_holding\": \"0\",\n    \"quarterly_trend\": [\n      {\n        \"quarter\": \"2026-06-30\",\n        \"pct_promoter_holding_pledged\": \"0\",\n        \"pct_total_shares_pledged\": \"1.39\",\n        \"promoter_holding_pct\": \"51.32\"\n      },\n      {\n        \"quarter\": \"2026-03-31\",\n        \"pct_promoter_holding_pledged\": \"0\",\n        \"pct_total_shares_pledged\": \"1.23\",\n        \"promoter_holding_pct\": \"50.89\"\n      }\n    ],\n    \"recent_events\": []\n  },\n  \"meta\": {}\n}"
+    }
+   ]
+  },
+  "jsonrpc": "2.0",
+  "id": 1
+ },
+ "err_unknown_symbol": {
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "Error: Not found (tapetide-api): {\"error\":\"Company not found: ZZNOSUCH. Use search to find the correct symbol.\"} No financial statements for \"ZZNOSUCH\": statements exist for listed operating companies only, so ETFs, index funds and bonds return nothing here (use get_stock_quote or get_price_history for those). If it is a company, call search_stocks to confirm the symbol."
+    }
+   ],
+   "isError": true
+  },
+  "jsonrpc": "2.0",
+  "id": 1
+ },
+ "err_bad_section": {
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "Error: get_financials: unknown section \"bogus\". Valid values: profit_loss, quarterly, balance_sheet, cash_flow, ratios. Quarterly results are the \"quarterly\" section (profit_loss is annual). Shareholding is a separate tool: get_shareholding."
+    }
+   ],
+   "isError": true
+  },
+  "jsonrpc": "2.0",
+  "id": 1
+ },
+ "err_bad_token_401": {
+  "error": "invalid_token",
+  "error_description": "Invalid or expired token"
+ },
+ "err_no_token_401": {
+  "error": "authentication_required",
+  "error_description": "token required (recorded text said: bearer, redacted by scanner rule)"
+ },
+ "snapshot_reliance": {
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"data\": [{\"data\": {\"Book Value\": 668, \"Face Value\": 10, \"ROCE\": 10.3, \"ROE\": 8.91}, \"period_type\": \"snapshot\", \"periods\": [\"Book Value\", \"ROCE\", \"ROE\", \"Face Value\"], \"row_order\": [\"Book Value\", \"Face Value\", \"ROCE\", \"ROE\"], \"scraped_at\": \"2026-10-06\", \"section\": \"top_ratios\"}], \"meta\": {\"count\": 1}}"
+    }
+   ]
+  }
+ },
+ "synthetic_snapshot_hdfcbank": {
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"data\": [{\"section\": \"top_ratios\", \"period_type\": \"snapshot\", \"periods\": [\"Face Value\"], \"row_order\": [\"Face Value\"], \"data\": {\"Face Value\": 1}}], \"meta\": {\"count\": 1}}"
+    }
+   ]
+  }
+ },
+ "synthetic_snapshot_tcs": {
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"data\": [{\"section\": \"top_ratios\", \"period_type\": \"snapshot\", \"periods\": [\"Face Value\"], \"row_order\": [\"Face Value\"], \"data\": {\"Face Value\": 1}}], \"meta\": {\"count\": 1}}"
+    }
+   ]
+  }
+ },
+ "synthetic_snapshot_infy": {
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"data\": [{\"section\": \"top_ratios\", \"period_type\": \"snapshot\", \"periods\": [\"Face Value\"], \"row_order\": [\"Face Value\"], \"data\": {\"Face Value\": 5}}], \"meta\": {\"count\": 1}}"
+    }
+   ]
+  }
+ },
+ "synthetic_snapshot_itc": {
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"data\": [{\"section\": \"top_ratios\", \"period_type\": \"snapshot\", \"periods\": [\"Face Value\"], \"row_order\": [\"Face Value\"], \"data\": {\"Face Value\": 1}}], \"meta\": {\"count\": 1}}"
+    }
+   ]
+  }
+ }
+}

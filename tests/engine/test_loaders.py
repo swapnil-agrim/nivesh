@@ -13,8 +13,10 @@ from nivesh_adapters.analysis_data import (
     load_bars,
     load_estimates,
     load_peers,
+    load_screen_inputs,
     load_shareholding,
     load_statements,
+    load_valuation_inputs,
     sector_index_for,
     security_meta,
 )
@@ -409,3 +411,21 @@ def test_sector_market_and_benchmark_lookup_from_config_or_none_with_reason(
     assert sector_index_for(conn, no_sector, cfg).reason == "no sector recorded for this security"
     unmapped = sector_index_for(conn, sec, AnalysisSettings())
     assert unmapped.security_id is None and "analysis.ta.sector_index" in (unmapped.reason or "")
+
+
+def test_loaders_classify_a_deposit_taker_as_financial_without_a_sector(
+    master: tuple[sqlite3.Connection, dict[str, int]], db: duckdb.DuckDBPyConnection
+) -> None:
+    conn, ids = master
+    bank, plain = ids["LONE"], ids["BBB"]  # neither has a financial sector in the master
+    put_rows(
+        db,
+        srow(bank, "deposits", "5000", "2024-03-31", "2024-05-01"),
+        srow(bank, "revenue", "900", "2024-03-31", "2024-05-01"),
+        srow(plain, "revenue", "900", "2024-03-31", "2024-05-01"),
+    )
+    cfg, asof = AnalysisSettings(), date(2024, 6, 30)
+    kinds = load_valuation_inputs(db, conn, [bank, plain], asof, cfg, history=False)
+    assert (kinds[bank].sector_kind, kinds[plain].sector_kind) == ("financial", "general")
+    screen = load_screen_inputs(db, conn, [bank, plain], asof, cfg, needs={"statements"})
+    assert (screen[bank].sector_kind, screen[plain].sector_kind) == ("financial", "general")

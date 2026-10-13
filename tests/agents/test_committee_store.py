@@ -46,7 +46,7 @@ def test_snapshot_json_has_the_documented_fields_and_config_digest_including_wei
     assert cd["weights_version"] == settings.analysis.scoring.weights_version
     assert cd["weights_digest"] == digest_text(settings.analysis.scoring.weights_digest())
     assert (
-        re.fullmatch(r"([0-9a-f]{8}-){7}[0-9a-f]{8}", cd["agents"])
+        re.fullmatch(r"([0-9a-f]{8}\.){7}[0-9a-f]{8}", cd["agents"])
         and Decimal(got["engine_outputs"]["1"]["risk_facts"]["tested_weight_pct"]) == 2
     )
 

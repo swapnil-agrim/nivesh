@@ -18,6 +18,7 @@ from nivesh_adapters.cache import cached_fetch
 from nivesh_adapters.edgar import Edgar
 from nivesh_adapters.estimates import Estimates
 from nivesh_adapters.fundamentals_in import IndiaFundamentals
+from nivesh_adapters.fundamentals_tapetide import TapetideFundamentals
 from nivesh_adapters.macro import MacroFetch
 from nivesh_adapters.market_ingest import (
     ingest_estimates,
@@ -216,19 +217,24 @@ def _india_fundamentals() -> IndiaFundamentals:
     return IndiaFundamentals()
 
 
+def _tapetide() -> TapetideFundamentals:  # seam: tests inject a MockTransport client
+    return TapetideFundamentals()
+
+
 @market_app.command("fundamentals")
 def market_fundamentals(
     ctx: typer.Context,
     security: Annotated[str, typer.Argument(help="ISIN, symbol or company name.")],
     refresh: Annotated[bool, typer.Option(help="Bypass the fundamentals cache.")] = False,
 ) -> None:
-    """Fetch statements (US: SEC EDGAR; India: exchange XBRL) and, for US, filing text sections."""
+    """Fetch statements (US: SEC EDGAR; India: Tapetide free tier, BSE XBRL fallback) and, for
+    US, filing text sections. India needs a free TAPETIDE_TOKEN (`nivesh secrets set`)."""
     with user_errors(), stores(ctx) as st:
         sec = resolve_security(st.sql, security)
         shared = functools.cache(lambda: _edgar(st.settings))  # one rate limiter for the run
         rep = ingest_fundamentals(
             st.duck, st.sql, st.settings, sec, refresh=refresh,
-            edgar=shared, india=_india_fundamentals,
+            edgar=shared, india=_india_fundamentals, tapetide=_tapetide,
         )  # fmt: skip
         fil = (
             ingest_filings(
@@ -248,6 +254,14 @@ def market_fundamentals(
     )
     if sec.market != "US":
         typer.echo(f"shareholding quarters {rep.shareholding}")
+        if rep.estimated_rows:
+            typer.echo(f"estimated filing dates: {rep.estimated_rows}")
+    for note in rep.notes:
+        typer.echo(f"note: {note}")
+    if rep.tapetide_calls is not None:
+        typer.echo(
+            f"Tapetide calls this run: {rep.tapetide_calls} (free plan 50/day, resets 00:00 IST)"
+        )
     if rep.skipped:
         typer.echo(f"skipped periods: {len(rep.skipped)}")
     if fil is not None:

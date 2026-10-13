@@ -221,23 +221,39 @@ def write_fundamentals(
     source: str,
     *,
     shareholding: Sequence[ShareholdingRow] = (),
+    shareholding_source: str | None = None,
+    more: Sequence[tuple[str, Sequence[StatementRow]]] = (),
+    supersede: str | None = None,
     fetched_at: datetime | None = None,
 ) -> None:
     """Append-only across `filed_at` (a restatement adds a row); statements and shareholding land
-    in one transaction."""
+    in one transaction. `more` adds (source, rows) groups to the same transaction (a source that
+    labels some rows as estimated writes both groups together or neither). `supersede` names a
+    source whose rows for the same (period end, period type, item) as `rows` are deleted first:
+    a declared filing replaces an earlier estimate of the same figure."""
     stamp = to_iso(fetched_at or utcnow())
+    groups = [(source, rows), *more]
     f_rows = [
-        (security_id, r.period_end, r.period_type, r.item, r.value, r.currency, source, r.filed_at,
+        (security_id, r.period_end, r.period_type, r.item, r.value, r.currency, src, r.filed_at,
          stamp)
-        for r in rows
+        for src, group in groups
+        for r in group
     ]  # fmt: skip
+    sh_source = shareholding_source or source
     s_rows = [
-        (security_id, s.period_end, s.promoter_pct, s.promoter_pledged_pct, s.public_pct, source,
-         s.filed_at)
+        (security_id, s.period_end, s.promoter_pct, s.promoter_pledged_pct, s.public_pct,
+         sh_source, s.filed_at)
         for s in shareholding
     ]  # fmt: skip
+    replaced = [(security_id, supersede, r.period_end, r.period_type, r.item) for r in rows]
 
     def work() -> None:
+        if supersede and replaced:
+            conn.executemany(
+                "DELETE FROM fundamental WHERE security_id = ? AND source = ? AND period_end = ? "
+                "AND period_type = ? AND item = ?",
+                replaced,
+            )
         if f_rows:
             conn.executemany(
                 "INSERT OR REPLACE INTO fundamental VALUES (?,?,?,?,?,?,?,?,?)", f_rows

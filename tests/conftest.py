@@ -29,6 +29,7 @@ def _no_network_and_replay_mode(
     monkeypatch.setenv("NIVESH_REPLAY", "1")
     monkeypatch.delenv("NIVESH_RECORD", raising=False)
     monkeypatch.delenv("NIVESH_REFRESH", raising=False)
+    monkeypatch.delenv("TAPETIDE_TOKEN", raising=False)  # never inherit the owner's real token
     yield
 
 
