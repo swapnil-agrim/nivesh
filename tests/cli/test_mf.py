@@ -65,7 +65,8 @@ def test_mf_nav_prints_counts_dates_and_gaps(cli_env: Env, net: Net) -> None:
     assert r.exit_code == 0, r.output
     assert "added 4, source mfapi" in r.output
     assert "last NAV date: 2026-01-20" in r.output
-    assert "gap: 2026-01-08 to 2026-01-19 (8 weekdays without NAV)" in r.output
+    # 15 Jan 2026 is a built-in NSE holiday, so 7 weekdays are missing, not 8
+    assert "gap: 2026-01-08 to 2026-01-19 (7 weekdays without NAV)" in r.output
     again = runner.invoke(app, [*cli_env[0], "mf", "nav", "100001"])
     assert "added 0" in again.output
 

@@ -40,7 +40,7 @@ from nivesh_core.config import Settings
 from nivesh_core.db import init_stores
 from nivesh_core.db.duck import open_duck
 from nivesh_core.db.sqlite import open_sqlite
-from nivesh_core.errors import NiveshError
+from nivesh_core.errors import NiveshError, SecretNotFound
 from nivesh_core.market_store import get_news
 from nivesh_core.security_master import (
     MasterRow,
@@ -102,6 +102,15 @@ def _rows_for(
     return PARSERS[source](res.data)
 
 
+def _source_failure(source: str, err: Exception) -> str:
+    if source == "sec" and isinstance(err, SecretNotFound):
+        return (
+            "EDGAR_CONTACT not set; US securities skipped "
+            "(set it with `nivesh secrets set EDGAR_CONTACT`)"
+        )
+    return str(err)
+
+
 @master_app.command("build")
 def master_build(
     ctx: typer.Context,
@@ -116,13 +125,17 @@ def master_build(
         adapter = _master_sources()
         rows: list[MasterRow] = list(default_indices())
         failed: list[str] = []
+        ok: list[str] = []
+        why: list[str] = []
         for source in PARSERS:
             try:
                 got = _rows_for(source, from_dir, st, adapter, refresh)
             except (NiveshError, httpx.HTTPError, OSError) as e:
                 failed.append(f"{source}: {e}")
+                why.append(f"{source} ({_source_failure(source, e)})")
                 continue
             rows += got
+            ok.append(source)
             typer.echo(f"{source}: {len(got)} rows")
         if len(failed) == len(PARSERS):
             raise NiveshError("no master source could be read: " + "; ".join(failed))
@@ -134,6 +147,9 @@ def master_build(
         f"upgraded {summary.upgraded}, merged {summary.merged}, renamed {summary.renamed}, "
         f"aliases {summary.aliased}, rows_dropped {summary.rows_dropped}"
     )
+    typer.echo("sources ok: " + (", ".join(ok) or "none"))
+    if why:
+        typer.echo("sources failed: " + ", ".join(why))
     for line in failed:
         typer.echo(f"failed source {line}", err=True)
     for line in summary.conflicts:
@@ -157,6 +173,13 @@ def _day(value: str, name: str) -> date:
         raise NiveshError(f"--{name} must be an ISO date YYYY-MM-DD, got {value!r}") from None
 
 
+def _bad_rows_line(bad: dict[str, int], top: int = 5) -> str:
+    ranked = sorted(bad.items(), key=lambda kv: (-kv[1], kv[0]))
+    shown = ", ".join(f"{why} x{n}" for why, n in ranked[:top])
+    more = f", and {len(ranked) - top} more" if len(ranked) > top else ""
+    return f"bad rows skipped: {sum(bad.values())} ({shown}{more})"
+
+
 @market_app.command("prices")
 def market_prices(
     ctx: typer.Context,
@@ -177,6 +200,8 @@ def market_prices(
     typer.echo(f"{sec.symbol} ({sec.exchange}): bars {rep.bars}, actions {rep.actions}")
     typer.echo(f"flags: {flags}")
     typer.echo("gaps: " + (", ".join(d.isoformat() for d in rep.gaps) or "none"))
+    if rep.bad_rows:
+        typer.echo(_bad_rows_line(rep.bad_rows))
     if rep.stale:
         typer.echo("note: some data is stale (source failed, cached copy used)")
     for line in rep.failed:

@@ -170,3 +170,18 @@ def test_nav_adapters_have_no_write_methods() -> None:
         assert sorted(public) == ["fetch", "name", "source", "validate"], public
     assert issubclass(httpx.Client, object)
     assert navall_text({"1": ("1", MON)}).startswith("Scheme Code")
+
+
+def test_nav_amfi_fallback_follows_redirect() -> None:
+    from nivesh_adapters.master_sources import URLS
+
+    moved = "https://portal.amfiindia.com/spages/NAVAll-moved.txt"
+    body = navall_text({"100001": ("10.5", date(2026, 1, 5))})
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if str(req.url) == URLS["amfi"]:
+            return httpx.Response(302, headers={"Location": moved})
+        return httpx.Response(200, text=body)
+
+    c = httpx.Client(transport=httpx.MockTransport(handler))
+    assert AmfiNavAll(c).fetch(resource="navall").data == body

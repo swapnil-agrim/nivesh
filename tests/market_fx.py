@@ -83,12 +83,22 @@ BHAV_HEAD = (
 )
 
 
-def bhav_csv(day: date, rows: list[tuple[str, float]], series: str = "EQ") -> str:
-    """One UDiFF bhavcopy day: (symbol, close) rows with a +-2 range around the close."""
+def bhav_csv(
+    day: date,
+    rows: list[tuple[str, float]],
+    series: str = "EQ",
+    extra_rows: tuple[str, ...] = (),
+) -> str:
+    """One UDiFF bhavcopy day: (symbol, close) rows with a +-2 range around the close.
+
+    `extra_rows` are raw `symbol,series,open,high,low,close` lines appended as other securities."""
     body = [
         f"{day},{day},CM,NSE,STK,1,ISIN{sym},{sym},{series},{c},{c + 2},{c - 2},{c},{c},{c},1000"
         for sym, c in rows
     ]
+    for raw in extra_rows:
+        sym, ser, o, h, low, c = raw.split(",")
+        body.append(f"{day},{day},CM,NSE,STK,1,ISIN{sym},{sym},{ser},{o},{h},{low},{c},{c},{c},10")
     return "\n".join([BHAV_HEAD, *body]) + "\n"
 
 
@@ -113,6 +123,7 @@ class Feed:
     stooq: str | None = None
     fail: set[str] = field(default_factory=set)
     calls: list[str] = field(default_factory=list)
+    extra_rows: tuple[str, ...] = ()  # raw bhavcopy rows added to every session day
 
     def __call__(self, req: httpx.Request) -> httpx.Response:
         url = str(req.url)
@@ -123,7 +134,12 @@ class Feed:
             d = date(int(m[1][:4]), int(m[1][4:6]), int(m[1][6:]))
             if d not in self.closes:
                 return httpx.Response(404)
-            return httpx.Response(200, content=zipped(bhav_csv(d, [("RELIANCE", self.closes[d])])))
+            return httpx.Response(
+                200,
+                content=zipped(
+                    bhav_csv(d, [("RELIANCE", self.closes[d])], extra_rows=self.extra_rows)
+                ),
+            )
         if "ind_close_all" in url:
             head = "Index Name,Index Date,Open Index Value,High Index Value,Low Index Value,"
             head += "Closing Index Value,Volume\n"

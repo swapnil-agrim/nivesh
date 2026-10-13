@@ -142,7 +142,7 @@ def _flags(duck: duckdb.DuckDBPyConnection, sid: int, dates: set[date], tol: Dec
 
 
 def _holidays(settings: Settings) -> frozenset[date]:
-    return frozenset(d for days in settings.market.nse_holidays.values() for d in days)
+    return frozenset(d for days in settings.market.effective_nse_holidays().values() for d in days)
 
 
 def ingest_nav(

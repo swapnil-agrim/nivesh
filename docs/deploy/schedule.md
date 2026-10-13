@@ -15,8 +15,8 @@ use are in `config/schedule.yaml`.
   tick, or two overlapping ticks, find the record and leave the job alone.
 - Trading days. India jobs use the NSE calendar, US jobs the NYSE calendar. A job that needs a
   market day does not run on a weekend or a listed holiday. If the NSE holiday list for the year
-  is missing, the job is skipped and you get one notice to complete `market.nse_holidays` in
-  `config/nivesh.yaml`. `nivesh schedule status` warns while the list has fewer than
+  is missing (the built-in lists cover 2024-2026), the job is skipped and you get one notice to
+  complete `market.nse_holidays` in `config/nivesh.yaml`. `nivesh schedule status` warns while the list has fewer than
   `min_holidays_warn` dates.
 - Retries. A failing job is tried up to 3 times in all, waiting 30 s and then 120 s. After that
   one failure notice goes to your own delivery channels (`delivery.channels`). A spent monthly

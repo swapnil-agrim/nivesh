@@ -21,10 +21,11 @@ runner = CliRunner()
 Env = tuple[list[str], Path]
 FILES = {
     URLS["nse"]: "nse_equity_l.csv",
-    URLS["bse"]: "bse_scrips.csv",
     URLS["amfi"]: "amfi_navall.txt",
     URLS["sec"]: "sec_tickers_exchange.json",
 }
+BSE_HOST_PATH = "BhavCopy_BSE_CM_0_0_0_"  # the BSE master is the dated bhavcopy (any day)
+AMFI_MOVED = "https://portal.amfiindia.com/spages/NAVAll-moved.txt"
 
 
 class Net:
@@ -33,12 +34,21 @@ class Net:
     def __init__(self, fail: str | None = None) -> None:
         self.calls = 0
         self.fail = fail
+        self.amfi_redirect = False  # answer the AMFI URL with a 302 to AMFI_MOVED
+        self.bse_status = 200  # status of every dated BSE bhavcopy request
 
     def __call__(self, req: httpx.Request) -> httpx.Response:
         self.calls += 1
         url = str(req.url)
-        if self.fail and url == URLS[self.fail]:
+        source = "bse" if BSE_HOST_PATH in url else next(k for k, v in URLS.items() if v == url)
+        if self.fail == source:
             return httpx.Response(503)
+        if source == "bse":
+            if self.bse_status != 200:
+                return httpx.Response(self.bse_status)
+            return httpx.Response(200, text=(FX / "bse_scrips.csv").read_text())
+        if source == "amfi" and self.amfi_redirect:
+            return httpx.Response(302, headers={"Location": AMFI_MOVED})
         return httpx.Response(200, text=(FX / FILES[url]).read_text())
 
 
@@ -81,6 +91,42 @@ def test_master_build_survives_one_failed_source_and_reports_it(cli_env: Env, ne
     r = runner.invoke(app, [*args, "master", "build"])
     assert r.exit_code == 0, r.output
     assert "failed source bse" in r.output and "503" in r.output
+
+
+def test_master_build_bse_404_and_amfi_302_and_no_edgar_contact(
+    cli_env: Env, net: Net, monkeypatch: pytest.MonkeyPatch, fake_keyring: object
+) -> None:
+    monkeypatch.delenv("EDGAR_CONTACT", raising=False)
+    net.bse_status = 404
+    net.amfi_redirect = True
+    monkeypatch.setattr(  # the redirect target serves the NAVAll fixture
+        cm,
+        "_master_sources",
+        lambda: MasterSources(
+            httpx.Client(
+                transport=httpx.MockTransport(
+                    lambda req: (
+                        httpx.Response(200, text=(FX / "amfi_navall.txt").read_text())
+                        if str(req.url) == AMFI_MOVED
+                        else net(req)
+                    )
+                )
+            )
+        ),
+    )
+    r = runner.invoke(app, [*cli_env[0], "master", "build"])
+    assert r.exit_code == 0, r.output
+    assert "sources ok: nse, amfi" in r.stdout
+    assert "sources failed: bse (no BSE bhavcopy in the last 10 days)" in r.stdout
+    assert "sec (EDGAR_CONTACT not set; US securities skipped" in r.stdout
+    assert "nivesh secrets set EDGAR_CONTACT" in r.stdout
+    assert "failed source sec" in r.output and "failed source bse" in r.output
+
+
+def test_master_build_with_all_sources_ok_prints_no_failed_line(cli_env: Env, net: Net) -> None:
+    r = runner.invoke(app, [*cli_env[0], "master", "build"])
+    assert "sources ok: nse, bse, amfi, sec" in r.stdout and "sources failed" not in r.stdout
+    assert securities(cli_env[1]) > 10
 
 
 def test_master_build_fails_when_every_source_fails(
@@ -172,6 +218,23 @@ def test_market_prices_missing_nse_holiday_year_exits_1_with_config_hint(
 ) -> None:
     r = prices_cmd(cli_env[0], "RELIANCE", "--start", "2027-01-04", "--end", "2027-01-05")
     assert r.exit_code == 1 and "market.nse_holidays" in r.output
+
+
+def _without_configured_holidays(args: list[str]) -> None:
+    import re
+
+    cfg = Path(args[1]) / "nivesh.yaml"
+    block = re.compile(r"  nse_holidays:\n(?:    .*\n)+")
+    cfg.write_text(block.sub("  nse_holidays: {}\n", cfg.read_text()))
+
+
+def test_market_prices_2025_range_succeeds_without_config_entry(cli_env: Env, prices: Feed) -> None:
+    _without_configured_holidays(cli_env[0])
+    days = [date(2025, 1, 6), date(2025, 1, 7)]
+    prices.closes = dict(zip(days, [100.0, 101.0], strict=True))
+    r = prices_cmd(cli_env[0], "RELIANCE", "--start", "2025-01-06", "--end", "2025-01-07")
+    assert r.exit_code == 0, r.output
+    assert "bars 4" in r.output and "gaps: none" in r.output
 
 
 def test_market_prices_output_has_no_pii(cli_env: Env, prices: Feed) -> None:
@@ -375,3 +438,23 @@ def test_market_news_cli_counts_and_security_filter(cli_env: Env, newsnet: None)
     assert "results" in r.output and scan_text(r.output) == []
     r = runner.invoke(app, [*cli_env[0], "market", "news", "--security", "ZZZZQQ"])
     assert r.exit_code == 1 and "no security matches" in r.output
+
+
+def test_market_prices_prints_bad_rows_line_only_when_nonzero(cli_env: Env, prices: Feed) -> None:
+    args = ["RELIANCE", "--start", "2026-01-22", "--end", "2026-01-23"]
+    clean = prices_cmd(cli_env[0], *args)
+    assert clean.exit_code == 0 and "bad rows skipped" not in clean.output
+    prices.extra_rows = ("ZZBAD,T0,6.65,6.65,6.65,6.61",)
+    r = prices_cmd(cli_env[0], *args, "--refresh")
+    assert r.exit_code == 0, r.output
+    assert "bad rows skipped: 2 (T0: outside the day's range x2)" in r.output
+
+
+def test_market_prices_bad_rows_reasons_capped_at_five_with_remainder(
+    cli_env: Env, prices: Feed
+) -> None:
+    prices.extra_rows = tuple(f"ZZ{i},T{i},6.65,6.65,6.65,6.61" for i in range(7))
+    r = prices_cmd(cli_env[0], "RELIANCE", "--start", "2026-01-22", "--end", "2026-01-22")
+    assert r.exit_code == 0, r.output
+    line = next(x for x in r.output.splitlines() if x.startswith("bad rows skipped: 7"))
+    assert line.count(" x1") == 5 and line.endswith("and 2 more)")

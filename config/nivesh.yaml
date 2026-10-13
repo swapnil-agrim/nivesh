@@ -35,7 +35,7 @@ tax:
   # means 366 for strictly more than 365.
 
 # E4 market data. Secrets are refs; the EDGAR contact is read only from the secret EDGAR_CONTACT.
-# Series ids, feed urls and wire formats are per spec, unverified against live sources.
+# Series ids and feed urls are per spec, unverified; price wire formats verified 2026-10-13.
 market:
   edgar_max_per_sec: 8        # SEC allows 10
   fred_api_key: ref:FRED_API_KEY
@@ -56,10 +56,18 @@ market:
     dii_net: {source: nse_flows, id: dii}
   feeds:
     - {name: example-news, url: "https://example.invalid/feed.xml", kind: rss}
-  # NSE holidays are gazette-announced, not computable. Owner must complete this list from the
-  # NSE circular (lunar holidays are missing here); a year with no entry fails loudly.
+  # NSE holidays are gazette-announced, not computable. Shipped 2024-2026 (weekday closures
+  # only), also built in and united per year with this list; extend yearly from the NSE circular.
+  # A year with no entry anywhere still fails loudly (CalendarUnknown).
   nse_holidays:
-    2026: [2026-01-26, 2026-05-01, 2026-08-15, 2026-10-02, 2026-12-25]
+    2024: [2024-01-22, 2024-01-26, 2024-03-08, 2024-03-25, 2024-03-29, 2024-04-11, 2024-04-17,
+           2024-05-01, 2024-05-20, 2024-06-17, 2024-07-17, 2024-08-15, 2024-10-02, 2024-11-15,
+           2024-11-20, 2024-12-25]
+    2025: [2025-02-26, 2025-03-14, 2025-03-31, 2025-04-10, 2025-04-14, 2025-04-18, 2025-05-01,
+           2025-08-15, 2025-08-27, 2025-10-02, 2025-10-22, 2025-11-05, 2025-12-25]
+    2026: [2026-01-15, 2026-01-26, 2026-03-03, 2026-03-26, 2026-03-31, 2026-04-03, 2026-04-14,
+           2026-05-01, 2026-05-28, 2026-06-26, 2026-09-14, 2026-10-02, 2026-10-20, 2026-11-10,
+           2026-11-24, 2026-12-25]
 
 # E5 mutual funds: owner-set parameters, example only (nothing here is advice). Wire formats of
 # MFapi.in, AMFI NAVAll and the monthly-holdings source are per spec, unverified. The holdings

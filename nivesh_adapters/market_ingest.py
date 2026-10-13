@@ -131,12 +131,13 @@ class PriceReport:
     actions: int = 0
     stale: bool = False
     failed: list[str] = field(default_factory=list)
+    bad_rows: dict[str, int] = field(default_factory=dict)  # other securities' rows skipped
 
 
 def calendar_for(market: str, settings: Settings) -> Calendar:
     if market == "US":
         return Calendar.nyse()
-    return Calendar.nse({y: frozenset(v) for y, v in settings.market.nse_holidays.items()})
+    return Calendar.nse(settings.market.effective_nse_holidays())
 
 
 def india_yahoo_symbol(sec: SecurityRow) -> str:
@@ -151,6 +152,7 @@ class _Fetched:
     secondary: list[PriceBar] = field(default_factory=list)
     actions: list[CorpAction] = field(default_factory=list)
     primary_raw: bool = True
+    bad_rows: Counter[str] = field(default_factory=Counter)
 
 
 def _india(run: Run, sec: SecurityRow, days: list[date], ip: IndiaPrices) -> _Fetched:
@@ -162,13 +164,15 @@ def _india(run: Run, sec: SecurityRow, days: list[date], ip: IndiaPrices) -> _Fe
         if not data:
             continue
         if index:
-            out.primary += parse_indices(data, {sec.symbol.upper(): sec.id}).bars
+            parsed = parse_indices(data, {sec.symbol.upper(): sec.id}, audit=True)
         else:
             series = EQUITY_SERIES if src == "nse_bhavcopy" else None
-            ids = {sec.symbol: sec.id}
-            out.primary += parse_bhavcopy(
-                data, ids, key_col="TckrSymb", source=src, series=series
-            ).bars
+            parsed = parse_bhavcopy(
+                data, {sec.symbol: sec.id}, key_col="TckrSymb", source=src, series=series,
+                audit=True,
+            )  # fmt: skip
+        out.primary += parsed.bars
+        out.bad_rows += parsed.bad_rows
     if days:
         start, end = days[0].isoformat(), days[-1].isoformat()
         params = {
@@ -253,6 +257,7 @@ def ingest_prices(
         actions=len(got.actions),
         stale=run.stale,
         failed=run.failed,
+        bad_rows=dict(got.bad_rows),
     )
 
 

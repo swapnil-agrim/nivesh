@@ -1,17 +1,20 @@
 """Trading calendars for NSE and NYSE (BR-11). Pure: holiday data comes in as arguments.
 
 NYSE holidays are rule-computed (observed-day rules, Good Friday from the Gregorian Easter).
-NSE holidays are gazette-announced, so the caller passes them; a year without data raises
-`CalendarUnknown` instead of silently assuming weekdays are sessions.
+NYSE one-off closures are listed in `_NYSE_ONE_OFFS` (2025-01-09, national day of mourning).
+NSE holidays are gazette-announced, so the caller passes them (built-in lists live in
+`nivesh_core.nse_holidays`); a year without data raises `CalendarUnknown` instead of silently
+assuming weekdays are sessions.
 Early-close days (day after Thanksgiving, Christmas Eve) are still sessions.
 """
 
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Literal
 
 from nivesh_core.errors import CalendarUnknown
+from nivesh_core.nse_holidays import BUILTIN_YEARS
 from nivesh_core.timeutil import IST, ist_date
 
 Market = Literal["NSE", "NYSE"]
@@ -45,6 +48,9 @@ def _observed(d: date) -> date:
     return d - timedelta(days=1) if d.weekday() == 5 else d + timedelta(days=d.weekday() == 6)
 
 
+_NYSE_ONE_OFFS: dict[int, frozenset[date]] = {2025: frozenset({date(2025, 1, 9)})}
+
+
 def nyse_holidays(year: int) -> frozenset[date]:
     fixed = [date(year, 7, 4), date(year, 12, 25)]
     if year >= 2022:
@@ -61,6 +67,7 @@ def nyse_holidays(year: int) -> frozenset[date]:
         _nth_weekday(year, 9, 0, 1),  # Labor
         _nth_weekday(year, 11, 3, 4),  # Thanksgiving
     }
+    out |= _NYSE_ONE_OFFS.get(year, frozenset())
     return frozenset(out)
 
 
@@ -74,7 +81,7 @@ class Calendar:
         return cls("NYSE")
 
     @classmethod
-    def nse(cls, holidays: dict[int, Collection[date]]) -> "Calendar":
+    def nse(cls, holidays: Mapping[int, Collection[date]]) -> "Calendar":
         return cls("NSE", {y: frozenset(v) for y, v in holidays.items()})
 
     def _year_holidays(self, year: int) -> frozenset[date]:
@@ -82,7 +89,8 @@ class Calendar:
             return nyse_holidays(year)
         if year not in self.holidays:
             raise CalendarUnknown(
-                f"no {self.market} holiday data for {year}; add it under market.nse_holidays"
+                f"no {self.market} holiday data for {year}; add it under market.nse_holidays in "
+                f"config/nivesh.yaml (built-in lists cover {BUILTIN_YEARS[0]}-{BUILTIN_YEARS[-1]})"
             )
         return self.holidays[year]
 

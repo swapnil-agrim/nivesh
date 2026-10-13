@@ -100,7 +100,7 @@ def run_cmd(
 
 def _warnings(settings: Settings, floor: int, at: datetime) -> list[str]:
     year = ist_date(at).year
-    known = settings.market.nse_holidays.get(year)
+    known = settings.market.effective_nse_holidays().get(year)
     if known is None:
         return [f"NSE holiday list has no dates for {year}; India jobs are skipped until it does"]
     if len(known) < floor:

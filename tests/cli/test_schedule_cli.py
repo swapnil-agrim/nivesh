@@ -83,7 +83,7 @@ def test_status_before_any_run_shows_ist_and_the_holiday_warning(env: Env) -> No
     assert "schedule status at 2026-10-09 08:00 IST" in r.stdout
     assert "brief_in: never run; next 2026-10-12 08:00 IST" in r.stdout
     assert "brief_us: disabled" in r.stdout
-    assert "NSE holiday list has only 5 dates for 2026" in r.stdout
+    assert "NSE holiday list" not in r.stdout  # 2026 is covered by the built-in list
 
 
 def test_status_shows_late_and_skip_reasons_and_json_is_stable(
@@ -108,7 +108,24 @@ def test_status_shows_late_and_skip_reasons_and_json_is_stable(
     data = json.loads(a.stdout)
     brief = next(j for j in data["jobs"] if j["job"] == "brief_in")
     assert brief["last"]["late"] is True and brief["last"]["finished_ist"].endswith("IST")
-    assert data["warnings"] and list(data) == sorted(data)
+    assert data["warnings"] == [] and list(data) == sorted(data)
+
+
+def test_status_warns_when_a_listed_year_has_too_few_dates(env: Env) -> None:
+    cfg = Path(env[0][1]) / "nivesh.yaml"
+    cfg.write_text(
+        cfg.read_text().replace(
+            "  nse_holidays:", "  nse_holidays:\n    2027: [2027-01-26, 2027-05-03, 2027-10-20]"
+        )
+    )
+    r = call(env, "schedule", "status", "--now", "2027-01-04T08:00:00+05:30")
+    assert "NSE holiday list has only 3 dates for 2027" in r.stdout
+
+
+def test_schedule_warnings_use_merged_list(env: Env) -> None:
+    for at in ("2024-06-03T08:00:00+05:30", "2025-06-02T08:00:00+05:30"):
+        r = call(env, "schedule", "status", "--now", at)
+        assert "NSE holiday list" not in r.stdout, at  # built-in years need no config entry
 
 
 def test_status_warns_when_the_year_has_no_holiday_list(env: Env) -> None:
