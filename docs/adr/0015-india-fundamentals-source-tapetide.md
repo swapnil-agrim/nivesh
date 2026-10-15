@@ -81,7 +81,7 @@ a 3-year growth rate: disclosed, not corrected.
 - **D2 Seam.** `ingest_fundamentals(..., tapetide=TapetideFundamentals)` beside `india=`; the CLI
   has `_tapetide()` like `_india_fundamentals()`. Tests inject MockTransport clients.
 - **D3 Network and secret.** A private `_rpc` helper posts JSON-RPC. The token is read per call
-  through `nivesh_core.secrets` and held in no attribute, parameter, cache row or message; the
+  through `nivesh_core.secrets` and held in no attribute, cache parameter or message; the
   client and the rate limiter are built only after the token check. The scheme word is built by
   concatenation so the secret scanner stays clean. Calls are paced at one per 1.1 seconds.
 - **D4 Degradation and halting.** A security with no BSE scrip code used to stop the India ingest
@@ -102,9 +102,9 @@ a 3-year growth rate: disclosed, not corrected.
   magnitude above 1e12 in a statement cell; in the shareholding table only the percentage rows
   Promoters, FIIs, DIIs, Government, Public and Others are bounded, at 1000, while other rows such
   as `No. of Shareholders` (counts in the millions) must merely be flat; in the snapshot only
-  `Face Value` is checked as a number; a pledge that is not an object or whose percentage is
-  non-numeric or outside 0..100); bad data is never cached. The statements,
-  the face-value snapshot and the shareholding are separate calls and **fail independently**: each
+  `Face Value` is checked as a number; a pledge that is not an object or whose percentage is a
+  number outside 0..100 (a non-numeric one is stored as unknown)); bad data is never cached. The
+  statements, the face-value snapshot and the shareholding are separate calls and **fail independently**: each
   value-check failure is a failed-source line with its reason (the ingest never aborts), and one
   bad statement section loses only that section. Scalar or non-object `availability`, a period
   label with an impossible year, an implausible face value or share count, and any

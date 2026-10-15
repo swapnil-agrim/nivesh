@@ -5,7 +5,7 @@ One company costs six billed calls (four statement sections, one all-sections sn
 face value, one shareholding); the free plan allows 50 a day, so everything is cached for the
 `fundamentals` TTL and a token or quota failure halts the adapter for the rest of the run (no
 retry that could burn quota). The token is read per call through the secret store and lives in
-no attribute, parameter, cache row or message. `_fetch` returns JSON-native data; the pure
+no attribute, cache parameter or message. `_fetch` returns JSON-native data; the pure
 mappers below turn it into stored rows after the cache.
 """
 
@@ -44,7 +44,7 @@ _SET_HINT = (
     f"create a free token at tapetide.com/settings/tokens, then: nivesh secrets set {SECRET_NAME}"
 )
 _QUOTA = re.compile(r"rate.?limit|quota|too many requests|daily limit|per day", re.I)
-_NOT_FOUND = re.compile(r"not found", re.I)
+_NOT_FOUND = re.compile(r"\b(?:company|symbol|section) not found", re.I)
 _SSE_DATA = "data:"
 _QUOTA_MSG = (
     "Tapetide daily quota reached (free plan: 50 calls/day, resets 00:00 IST); "
@@ -123,6 +123,15 @@ def _check_pledge(pledge: Any) -> None:
     if not isinstance(pledge, dict):
         raise DataQualityError(SOURCE, "promoter_pledge", pledge, "expected an object")
     pct = pledge.get("pct_of_promoter_holding")
+    # text, bool, list, NaN and inf are unparsable, so the mapper stores None; decide on the type
+    # first (never `_dec` here: it raises OverflowError on an int above ~1e308)
+    if (
+        isinstance(pct, bool)
+        or not isinstance(pct, int | float)
+        or pct != pct
+        or abs(pct) == float("inf")
+    ):
+        return
     _number("pct_of_promoter_holding", pct, 100.0)
     if pct is not None and pct < 0:
         raise DataQualityError(SOURCE, "pct_of_promoter_holding", pct, "outside 0..100")
@@ -409,7 +418,11 @@ def map_statements(
             continue
         data = sec["data"]
         ptype: PeriodType = "Q" if name == "quarterly" else "A"
-        avail = {a.get("period"): a for a in sec.get("availability") or [] if isinstance(a, dict)}
+        avail = {
+            a.get("period"): a
+            for a in sec.get("availability") or []
+            if isinstance(a, dict) and isinstance(a.get("period"), str)
+        }
         financial = bool({"Financing Profit", "Deposits"} & set(data))
         future: list[str] = []
         for label in sec["periods"]:

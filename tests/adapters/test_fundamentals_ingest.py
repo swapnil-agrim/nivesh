@@ -2,7 +2,8 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +14,7 @@ import pytest
 from nivesh_adapters.edgar import Edgar, RateLimiter
 from nivesh_adapters.fundamentals_in import IndiaFundamentals
 from nivesh_adapters.fundamentals_tapetide import TapetideFundamentals
-from nivesh_adapters.market_ingest import ingest_filings, ingest_fundamentals
+from nivesh_adapters.market_ingest import _minority_note, ingest_filings, ingest_fundamentals
 from nivesh_core.config import MarketSettings, Settings
 from nivesh_core.db import init_stores
 from nivesh_core.db.duck import open_duck
@@ -26,7 +27,7 @@ from nivesh_core.market_store import (
     list_filings,
 )
 from nivesh_core.security_master import SecurityMaster, SecurityRow, build_master
-from nivesh_engine.statements import latest_as_of
+from nivesh_engine.statements import StatementRow, latest_as_of
 from tests import pii_values as pv
 from tests import tapetide_fx as tx
 from tests.conftest import MemoryKeyring
@@ -585,8 +586,8 @@ HOSTILE_HOLDING = [
     ("string_cell", _set_promoter("50.1%"), "Promoters", True),
     ("huge_pct", _set_promoter(1e9), "Promoters", True),
     ("pledge_scalar", _set_pledge(7), "promoter_pledge", True),
-    ("pledge_string_pct", _pledge_pct("abc"), "pct_of_promoter_holding", True),
     ("pledge_huge_pct", _pledge_pct(1e9), "pct_of_promoter_holding", True),
+    ("pledge_huge_int", _pledge_pct(10**400), "pct_of_promoter_holding", True),
     ("pledge_over_100", _pledge_pct(150), "pct_of_promoter_holding", True),
     ("pledge_negative", _pledge_pct(-5), "pct_of_promoter_holding", True),
 ]
@@ -885,3 +886,86 @@ def test_row_and_period_names_from_the_vendor_are_stripped_in_failed_lines(
     rep = run_in(env, "RELIANCE", with_token(monkeypatch, srv))
     assert any("profit_loss" in f and "bad" in f for f in rep.failed)
     assert _bad_chars(rep.failed) == []
+
+
+# --- #130 hardening ---
+
+
+def test_unparsable_pledge_pct_keeps_the_holding_rows_and_stores_none(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    srv = tx.Tapetide()
+    _holding(
+        lambda p: p["promoter_pledge"].update(pct_of_promoter_holding="abc", status="unknown")
+    )(srv)
+    rep = run_in(env, "RELIANCE", with_token(monkeypatch, srv))
+    assert rep.failed == [] and rep.shareholding == 8
+    last = get_shareholding(env.duck, rep.security_id)[-1]
+    assert last.promoter_pct is not None and last.public_pct is not None
+    assert last.promoter_pledged_pct is None
+
+
+def test_default_today_is_the_ist_date_so_an_early_ist_end_of_day_period_is_kept(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 2026-06-29 20:00 UTC is 2026-06-30 01:30 IST: the Jun 2026 quarter end is today, not future
+    now = datetime(2026, 6, 29, 20, 0, tzinfo=UTC)
+    monkeypatch.setattr("nivesh_adapters.market_ingest.utcnow", lambda: now)
+    rep = ingest_fundamentals(
+        env.duck,
+        env.sql,
+        env.settings,
+        env.sec("RELIANCE"),
+        tapetide=with_token(monkeypatch, tx.Tapetide()),
+    )  # no `today`: the default is under test
+    filed = env.duck.execute(
+        "select distinct filed_at from fundamental"
+        " where period_end = date '2026-06-30' and period_type = 'Q'"
+    ).fetchall()
+    assert filed == [(date(2026, 6, 30),)]  # recorded 2026-07-20, clamped to today
+    assert get_shareholding(env.duck, rep.security_id)[-1].period_end == date(2026, 6, 30)
+    assert rep.clamped_rows > 0
+
+
+@pytest.mark.parametrize(
+    ("ni", "expect"),
+    [
+        ("12000", "Net Profit, 20.0%"),
+        ("8000", "Net Profit, -20.0%"),
+        ("9800", None),
+        ("10300", None),
+    ],
+)
+def test_minority_note_discloses_a_gap_in_either_direction_and_ignores_small_ones(
+    ni: str, expect: str | None
+) -> None:
+    def row(item: str, value: str) -> StatementRow:
+        return StatementRow(
+            period_end=date(2026, 3, 31),
+            period_type="A",
+            item=item,
+            value=Decimal(value),
+            currency="INR",
+            filed_at=date(2026, 4, 27),
+        )
+
+    # shares 1000 x EPS 10 = 10000 attributable; 9800 is -2% and 10300 exactly +3%: both ignored
+    note = _minority_note([row("shares_out", "1000"), row("eps", "10"), row("net_income", ni)])
+    if expect is None:
+        assert note is None
+    else:
+        assert isinstance(note, str) and "minority interest" in note and expect in note
+
+
+def test_snapshot_and_shareholding_are_not_requested_when_no_statement_section_arrived(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    srv = tx.Tapetide()
+    srv.aliases["NOBSE"] = "RELIANCE"
+    for s in tx.SECTIONS:
+        srv.fail_sections[s] = httpx.Response(200, text="<html>bad gateway</html>")
+    rep = run_in(env, "NOBSE", with_token(monkeypatch, srv))
+    assert srv.calls == 4  # the four sections only: no snapshot, no shareholding
+    assert {b["params"]["name"] for b in srv.bodies} == {"get_financials"}
+    assert {b["params"]["arguments"].get("section") for b in srv.bodies} == set(tx.SECTIONS)
+    assert rep.tapetide_calls == 0 and rep.rows == 0 and rep.shareholding == 0
