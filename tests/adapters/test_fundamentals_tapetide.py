@@ -572,3 +572,82 @@ def test_pledge_status_none_alone_is_zero_and_numeric_zero_alone_is_zero() -> No
     payload["promoter_pledge"] = {"as_of_date": "2026-06-30", "pct_of_promoter_holding": None,
                                   "status": "unknown"}  # fmt: skip
     assert map_shareholding(payload, TODAY).rows[-1].promoter_pledged_pct is None
+
+
+# --- #130 hardening ---
+
+
+@pytest.mark.parametrize("pct", ["abc", "12.5%", True, [1], float("nan"), float("inf")])
+def test_unparsable_pledge_pct_text_bool_list_or_nan_is_none_and_keeps_promoter_and_public_rows(
+    pct: Any,
+) -> None:
+    srv = Tapetide()
+    payload = inner(srv.misc["shareholding"])
+    payload["promoter_pledge"].update(pct_of_promoter_holding=pct, status="unknown")
+    srv.misc["shareholding"] = envelope(payload)
+    rows = map_shareholding(adapter(srv).fetch(**SHARE).data, TODAY).rows
+    assert len(rows) == 8
+    assert rows[-1].promoter_pct == Decimal("50.48") and rows[-1].public_pct == Decimal("8.58")
+    assert rows[-1].promoter_pledged_pct is None
+
+
+@pytest.mark.parametrize("bad", [["Mar 2026"], {"p": "Mar 2026"}])
+def test_availability_entry_with_an_unhashable_period_is_skipped_on_its_own(bad: Any) -> None:
+    secs = sections("RELIANCE")
+    entry = {"period": bad, "available_from": "2026-04-27", "basis": "reported"}
+    secs["profit_loss"]["availability"].insert(0, entry)
+    got = map_statements(secs, face("RELIANCE"), TODAY)
+    assert got.reported == mapped("RELIANCE").reported
+    assert got.estimated == mapped("RELIANCE").estimated
+    assert value(got.reported, "revenue", FY26) == Decimal(1055780) * CR
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Error: Not found (tapetide-api): Company not found: X",
+        "Error: Symbol not found: X",
+        "Error: Section not found: X",
+    ],
+)
+def test_company_symbol_and_section_not_found_texts_read_as_no_data_for_both_call_kinds(
+    text: str,
+) -> None:
+    srv = Tapetide()
+    srv.fail_all = httpx.Response(200, json=envelope(text, is_error=True))
+    with pytest.raises(
+        SourceUnavailable, match="Tapetide has no financial statements for RELIANCE"
+    ):
+        adapter(srv).fetch(**QUARTERLY)
+    with pytest.raises(SourceUnavailable, match="Tapetide has no shareholding data for RELIANCE"):
+        adapter(srv).fetch(**SHARE)
+
+
+@pytest.mark.parametrize(
+    ("text", "tail"),
+    [
+        ("Error: Not found (tapetide-api): token not found", "token not found"),
+        ("Error: Not found (tapetide-api): nothing here", "nothing here"),
+    ],
+)
+def test_token_not_found_and_bare_not_found_prefix_are_failures_not_an_empty_result(
+    text: str, tail: str
+) -> None:
+    for params in (QUARTERLY, SHARE):
+        srv = Tapetide()
+        srv.fail_all = httpx.Response(200, json=envelope(text, is_error=True))
+        ad = adapter(srv)
+        with pytest.raises(SourceUnavailable, match="Tapetide error") as e:
+            ad.fetch(**params)
+        assert tail in str(e.value) and "has no" not in str(e.value)
+        assert not ad.halted
+
+
+@pytest.mark.parametrize("cell", [True, False])
+def test_boolean_cell_is_a_data_quality_error_not_a_number(cell: bool) -> None:
+    srv = Tapetide()
+    sec = inner(srv.files["RELIANCE"]["quarterly"])
+    sec["data"][0]["data"]["Sales"]["Jun 2026"] = cell
+    srv.fail_all = httpx.Response(200, json=envelope(sec))
+    with pytest.raises(DataQualityError, match="finite number"):
+        adapter(srv).fetch(**QUARTERLY)

@@ -88,7 +88,7 @@ from nivesh_core.market_store import (
     write_prices,
 )
 from nivesh_core.security_master import SecurityMaster, SecurityRow
-from nivesh_core.timeutil import utcnow
+from nivesh_core.timeutil import ist_date, utcnow
 from nivesh_engine.adjust import adjust_closes, cross_check
 from nivesh_engine.calendar import Calendar, find_gaps
 from nivesh_engine.classify import Classifier, RuleClassifier, classify_item
@@ -511,7 +511,7 @@ def ingest_fundamentals(
             rep.skipped = q.skipped
             write_fundamentals(duck, sec.id, q.rows, ed.source)
     else:
-        _india_fundamentals(run, master, sec, rep, tapetide(), india, today or utcnow().date())
+        _india_fundamentals(run, master, sec, rep, tapetide(), india, today or ist_date(utcnow()))
     rep.rows = len(_keys(duck, sec.id) - before)  # inserted, not net of superseded estimates
     rep.annual_periods, rep.quarterly_periods = _depth(duck, sec.id)
     rep.stale, rep.failed = run.stale, [scrub_text(f) for f in run.failed]
