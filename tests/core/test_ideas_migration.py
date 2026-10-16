@@ -39,7 +39,8 @@ def test_fresh_store_is_at_latest_version(tmp_path: Path) -> None:
     c = sqlite3.connect(tmp_path / "d" / "nivesh.sqlite")
     assert c.execute("SELECT max(version) FROM schema_version").fetchone()[0] >= 7
     # later migrations are allowed (forward-only); this pin is a floor, not the latest file
-    assert sorted(p.name for p in SQLITE.glob("*.sql"))[-1] >= "0009_scheduler_alerts.sql"
+    files = sorted(p.name for p in SQLITE.glob("*.sql"))
+    assert "0009_scheduler_alerts.sql" in files and files[-1] >= "0009_scheduler_alerts.sql"
 
 
 def fresh() -> sqlite3.Connection:

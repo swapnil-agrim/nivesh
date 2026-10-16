@@ -85,6 +85,8 @@ def test_adr_discloses_the_limits_found_in_review() -> None:
         "per-minute limit",  # D6: a vendor halt row fills the window and cannot be taken back
         "cannot be taken back",
         "minority's equity is unverified",  # D10: the ROE denominator
+        "counts as daily",  # D6: a reply naming both windows fills the day only
+        "[profit: <basis>",  # D10: the fa text view shows the label
     ):
         assert needle in flat, needle
 

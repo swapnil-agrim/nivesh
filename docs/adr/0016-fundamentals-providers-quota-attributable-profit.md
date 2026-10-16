@@ -109,8 +109,10 @@ not investment advice.
   and in the ingest report notes. **Halt, never retry:** there is no retry anywhere. When the vendor
   itself reports a halt (HTTP 429, quota wording or a `Retry-After` header) the adapter persists it
   with `Budget.exhaust`: one `kind=manual` row tops the relevant window up to its cap (the IST day
-  for generic or daily wording; for monthly wording a row dated on the first day of the monthly
-  window, so it fills the month and not the day), in one `BEGIN IMMEDIATE` so racing processes add
+  for generic or daily wording; for monthly wording alone a row dated on the first day of the
+  monthly window, so it fills the month and not the day; a reply that names both windows counts as
+  daily, because over-filling the month cannot be taken back while a true monthly exhaustion that
+  also says "per day" costs at most one refused request per new IST day), in one `BEGIN IMMEDIATE` so racing processes add
   the gap once, and it never lowers anything. The next process then refuses without spending a
   request to learn the same thing. A token rejection (401, 403) halts but does not exhaust.
   **Disclosed limit:** the top-up row is an ordinary manual row, so `quota status` shows it as
@@ -201,7 +203,7 @@ not investment advice.
   for `net_margin_pct` and `roe_pct` in `fa`, the bank earnings DCF base in `valuation`, and annual
   `net_margin` and `roe` in `get_ratios`; each metric's inputs carry `net_income` (the figure
   used), `net_income_consolidated`, `profit_basis`, `profit_gap_pct` and, when flagged,
-  `profit_reason`; `get_ratios` gains the additive key `profit_basis` (quarterly rows have no share
+  `profit_reason`; the `fa` text view appends `[profit: <basis>[, gap N%]]` to such a metric; `get_ratios` gains the additive key `profit_basis` (quarterly rows have no share
   count and are labelled `consolidated_minority_unknown`). On the recorded fixtures: RELIANCE gap
   +18.55% (attributable 80,772.5 crore against 95,754), HDFCBANK +4.22% (76,011.2 against 79,219),
   ITC +1.60%, TCS +0.44% and INFY +0.30% (no minority detected); ROE RELIANCE 9.25 against 10.96 and

@@ -347,6 +347,35 @@ def two_providers(data: Path) -> None:
         duck.close()
 
 
+def test_text_output_names_the_profit_basis_of_a_metric_that_has_one() -> None:
+    """The human view shows which profit a figure rests on, as the JSON and MCP views do."""
+    out: list[str] = []
+    attributable = {"value": "7.65", "available": True, "reason": None, "inputs": {
+        "profit_basis": "eps_x_shares", "profit_gap_pct": "18.55"}}  # fmt: skip
+    unknown = {"value": "9.07", "available": True, "reason": None, "inputs": {
+        "profit_basis": "consolidated_minority_unknown", "profit_gap_pct": None}}  # fmt: skip
+    plain = {"value": "5", "available": True, "reason": None, "inputs": {"cfo": "1"}}
+    missing = {"value": None, "available": False, "reason": "no filings",
+               "inputs": {"profit_basis": "consolidated"}}  # fmt: skip
+    for name, metric in (("a", attributable), ("b", unknown), ("c", plain), ("d", missing)):
+        cengine._render(name, metric, 1, out)
+    assert out == [
+        "  a: 7.65 [profit: eps_x_shares, gap 18.55%]",
+        "  b: 9.07 [profit: consolidated_minority_unknown]",
+        "  c: 5",
+        "  d: unavailable (no filings)",
+    ]
+
+
+def test_fa_text_output_labels_an_india_net_margin_with_its_profit_basis(env: Env) -> None:
+    two_providers(env[1])  # revenue and net income only: no EPS or shares, so the basis is flagged
+    r = call(env, "fa", "RELI")
+    line = next(x for x in r.output.splitlines() if x.strip().startswith("net_margin_pct:"))
+    assert line.endswith("[profit: consolidated_minority_unknown]"), line
+    us = call(env, "fa", "US1")  # US output is never labelled
+    assert "[profit:" not in us.output
+
+
 def test_fa_cross_check_appends_the_provider_comparison_after_the_normal_output(env: Env) -> None:
     two_providers(env[1])
     plain = call(env, "fa", "RELI")

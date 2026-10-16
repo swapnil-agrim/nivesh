@@ -83,5 +83,5 @@ one company, and run `nivesh fundamentals compare SYMBOL` to see how the new pro
 the one you read today; it never averages and never picks a winner. Only a response seen with your
 own eyes lets you remove an UNVERIFIED marker, and only for what you saw. For a metered vendor,
 `nivesh quota status --vendor NAME` shows the local count; calls other clients of the same plan spent
-are entered with `nivesh quota set NAME --used-today N`, because the ledger only knows this
-machine's attempts.
+are entered with `nivesh quota set NAME --used-today N`, because the ledger only knows the attempts
+recorded in its own data directory.

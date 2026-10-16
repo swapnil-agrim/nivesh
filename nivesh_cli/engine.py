@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import duckdb
 import typer
@@ -97,11 +97,22 @@ def _label(item: object, index: int) -> str:
     return f"[{index}]"
 
 
+def _profit_label(metric: dict[str, Any]) -> str:
+    """` [profit: <basis>[, gap N%]]` for an India figure that rests on a named profit basis (the
+    JSON and MCP views carry the same in `inputs`); nothing for any other metric."""
+    inputs = metric.get("inputs")
+    basis = inputs.get("profit_basis") if isinstance(inputs, dict) else None
+    if not isinstance(basis, str):
+        return ""
+    gap = inputs.get("profit_gap_pct") if isinstance(inputs, dict) else None
+    return f" [profit: {basis}{'' if gap is None else f', gap {gap}%'}]"
+
+
 def _render(name: str, v: object, depth: int, out: list[str]) -> None:
     pad = "  " * depth
     if isinstance(v, dict) and _is_metric(v):
         shown = _scalar(v["value"]) if v["available"] else f"unavailable ({v['reason']})"
-        out.append(f"{pad}{name}: {shown}")
+        out.append(f"{pad}{name}: {shown}{_profit_label(v) if v['available'] else ''}")
     elif isinstance(v, dict):
         out.append(f"{pad}{name}:")
         for k, x in v.items():

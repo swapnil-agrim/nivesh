@@ -128,6 +128,6 @@ def test_migrations_are_forward_only_and_no_new_dependency_file_content() -> Non
         p.name for p in (ROOT / "nivesh_core" / "db" / "migrations" / "sqlite").iterdir()
     )
     # later migrations are allowed (forward-only, see tests/core/test_migrate.py); the floor stays
-    assert names[-1] >= "0009_scheduler_alerts.sql"
+    assert "0009_scheduler_alerts.sql" in names and names[-1] >= "0009_scheduler_alerts.sql"
     deps = (ROOT / "pyproject.toml").read_text()
     assert "smtp" not in deps.lower() and "telegram" not in deps.lower()
