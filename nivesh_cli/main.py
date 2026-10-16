@@ -11,10 +11,12 @@ from nivesh_cli.brief import brief_app
 from nivesh_cli.common import metered_run, profile_of, settings_of, user_errors
 from nivesh_cli.deliver import deliver_app
 from nivesh_cli.engine import engine_app
+from nivesh_cli.fundamentals import fundamentals_app
 from nivesh_cli.holdings import holdings_app
 from nivesh_cli.ideas import ideas_app
 from nivesh_cli.market import market_app, master_app
 from nivesh_cli.mf import mf_app
+from nivesh_cli.quota import quota_app
 from nivesh_cli.research import research_app
 from nivesh_cli.review import review_app
 from nivesh_cli.schedule import alerts_app, schedule_app
@@ -52,7 +54,9 @@ app.registered_commands.extend(
 )  # decide, rescore, scorecard, calibration
 app.add_typer(master_app, name="master")
 app.add_typer(market_app, name="market")
+app.add_typer(fundamentals_app, name="fundamentals")
 app.add_typer(mf_app, name="mf")
+app.add_typer(quota_app, name="quota")
 app.add_typer(thesis_app, name="thesis")
 app.add_typer(review_app, name="review")
 app.add_typer(universe_app, name="universe")

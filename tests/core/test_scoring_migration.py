@@ -106,7 +106,7 @@ def test_migration_on_a_0007_store_keeps_rows(tmp_path: Path) -> None:
     c.execute("INSERT INTO run (id, command, started_at, status) VALUES (1, 'ideas', 't', 'ok')")
     c.execute(ENTRY)
     migrate.apply(c, SQLITE)
-    assert migrate.current_version(c) == 9
+    assert migrate.current_version(c) == migrate.latest_version(SQLITE) >= 9  # not pinned to 9
     assert c.execute("SELECT id, source, as_of FROM ledger_entry").fetchall() == [
         (1, "verdict", None)
     ]

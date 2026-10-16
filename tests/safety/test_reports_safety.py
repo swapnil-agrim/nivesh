@@ -123,10 +123,11 @@ def test_report_code_never_emits_engine_call_records() -> None:
             assert "engine_call" not in path.read_text(), path.name
 
 
-def test_no_new_migration_and_no_new_dependency_file_content() -> None:
+def test_migrations_are_forward_only_and_no_new_dependency_file_content() -> None:
     names = sorted(
         p.name for p in (ROOT / "nivesh_core" / "db" / "migrations" / "sqlite").iterdir()
     )
-    assert names[-1] == "0009_scheduler_alerts.sql"
+    # later migrations are allowed (forward-only, see tests/core/test_migrate.py); the floor stays
+    assert names[-1] >= "0009_scheduler_alerts.sql"
     deps = (ROOT / "pyproject.toml").read_text()
     assert "smtp" not in deps.lower() and "telegram" not in deps.lower()

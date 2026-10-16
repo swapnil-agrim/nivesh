@@ -20,6 +20,7 @@ from tests.cli.test_ideas_report_cli import clean_pm
 from tests.delivery_fx import DUMMY_HOOK, Calls, FakeSmtp, body_json
 from tests.ideas_fx import ASOF, seed_ideas_store, with_benchmarks
 from tests.run_paths import run_path
+from tests.security.test_ideas_pii import SECRET_LITERAL
 
 ROOT = Path(__file__).resolve().parents[2]
 runner = CliRunner()
@@ -93,7 +94,7 @@ def test_new_fixtures_commands_and_docs_have_no_key_shaped_literals() -> None:
         assert scan_text(text) == [], p.name
         long_runs = [m for m in KEYLIKE.findall(text) if not m.isalpha() and not m.isdigit()]
         assert long_runs == [] or all("_" in m or "-" in m for m in long_runs), (p.name, long_runs)
-        assert not re.search(r"(?i)\b(secret|password|credential)\b\s*[:=]", text), p.name
+        assert not SECRET_LITERAL.search(text), p.name
 
 
 def test_config_example_has_only_ref_names() -> None:

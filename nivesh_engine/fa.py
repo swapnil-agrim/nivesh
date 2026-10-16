@@ -14,11 +14,19 @@ India operating income is a profit-before-tax proxy, so EBIT, EBITDA, ROIC, ROCE
 cover are unavailable for India rather than mislabelled. Every other India metric is computed
 from the rows when the source filed them (Tapetide files cash flow and balance sheet, so cash
 conversion, free-cash-flow margin and accruals work) and otherwise says which item is missing.
-India net income may include minority interest (ADR-0015), which overstates net margin and ROE
-for groups with large minorities. Banks and NBFCs swap the EBITDA-based
-and working-capital metrics for asset quality, margin, funding and capital metrics. Coverage is
-the share of applicable metrics that are available; a metric that cannot apply to the security
-(for example promoter pledge for a US company) is marked "not applicable" and not counted.
+India net income is consolidated: it includes the minority's share (ADR-0015). Net margin and
+ROE therefore use the profit attributable to the parent where it can be derived (`attributable`):
+a reported minority interest, else EPS x shares of the same year; each says in its inputs which
+`profit_basis` it used, the consolidated figure and the gap. When it cannot be derived the metric
+keeps the consolidated figure, labelled `consolidated_minority_unknown` with the reason: nothing is
+dropped and the basis is never switched silently. Net income growth, cash conversion and accruals
+stay on consolidated profit (labelled `profit_basis="consolidated"`), because attributable profit
+exists for the latest year only and CFO is consolidated. US net income is EDGAR's parent line and
+is never relabelled. India revenue-based metrics quote the provider's `revenue_basis`. Banks and
+NBFCs swap the EBITDA-based and working-capital metrics for asset quality, margin, funding and
+capital metrics. Coverage is the share of applicable metrics that are available; a metric that
+cannot apply to the security (for example promoter pledge for a US company) is marked "not
+applicable" and not counted.
 """
 
 from collections.abc import Callable, Mapping, Sequence
@@ -29,6 +37,7 @@ from decimal import Decimal, localcontext
 from nivesh_core.analysis_config import AnalysisSettings
 from nivesh_core.market_models import ShareholdingRow
 from nivesh_engine import dmath
+from nivesh_engine.attributable import CONSOLIDATED, Attributable, attributable_profit
 from nivesh_engine.metric import Metric, coverage_pct, na, ok
 from nivesh_engine.statements import StatementRow, latest_as_of
 
@@ -108,6 +117,32 @@ def _book(rows: Sequence[StatementRow], as_of: date) -> tuple[_Book, date | None
 
 def _q(value: Decimal) -> Decimal:
     return dmath.quantize(value, QUANTUM)
+
+
+def _stamp(m: Metric, **extra: object) -> Metric:
+    """The same metric with more inputs (labels); value, availability and reason are unchanged."""
+    return Metric(m.value, m.available, m.reason, {**m.inputs, **extra})
+
+
+def _profit(book: _Book) -> Attributable:
+    """India: the profit of the fiscal year to use for margin and ROE (see `attributable`)."""
+    return attributable_profit(
+        book.at("net_income"), minority_interest=book.at("minority_interest"),
+        eps=book.at("eps"), shares_out=book.at("shares_out"),
+    )  # fmt: skip
+
+
+def _labelled(m: Metric, profit: Attributable | None) -> Metric:
+    """A profit-based metric with the basis, the two figures and the gap of the profit it used."""
+    return m if profit is None or profit.value is None else _stamp(m, **profit.inputs())
+
+
+def _net_margin(book: _Book, profit: Attributable | None) -> Metric:
+    if profit is None or profit.value is None:  # US, or India without a consolidated net income
+        return _calc(book, ("net_income", "revenue"),
+                     lambda g: _pct(g["net_income"], g["revenue"], "revenue"))  # fmt: skip
+    ni = profit.value
+    return _labelled(_calc(book, ("revenue",), lambda g: _pct(ni, g["revenue"], "revenue")), profit)
 
 
 def _gather(book: _Book, items: Sequence[str]) -> tuple[dict[str, Decimal], list[str]]:
@@ -194,10 +229,11 @@ def _yoy(book: _Book, n: int) -> Metric:
     return ok(_q((cur / prior[0] - 1) * dmath.HUNDRED), period_end=end, revenue=cur, prior=prior[0])
 
 
-def _roe(book: _Book) -> Metric:
+def _roe(book: _Book, ni: Decimal | None) -> Metric:
+    """Return on average equity of the fiscal year, on the net income the caller chose."""
     if book.fy is None:
         return na(f"no annual statements filed on or before {book.as_of}")
-    ni, eq = book.at("net_income"), book.at("total_equity")
+    eq = book.at("total_equity")
     if ni is None or eq is None:
         miss = [n for n, v in (("net_income", ni), ("total_equity", eq)) if v is None]
         return na(f"no {', '.join(miss)} filed for the fiscal year ending {book.fy}")
@@ -381,29 +417,43 @@ def fa_compute(
     sector_kind: str,
     cfg: AnalysisSettings,
     market: str | None = None,
+    revenue_basis: str | None = None,
 ) -> FaResult:
     """Fundamental metrics using only data filed on or before `as_of`.
 
     `rows` holds every filed version of every statement row; `market` is "IN" or "US" (inferred
-    from the row currency when omitted); `sector_kind` is "general" or "financial"."""
+    from the row currency when omitted); `sector_kind` is "general" or "financial";
+    `revenue_basis` is the India provider's definition of revenue, quoted in the inputs of the
+    revenue-based metrics (ignored for the US)."""
     mkt = market or ("IN" if any(r.currency == "INR" for r in rows) else "US")
     years = cfg.fa.growth_years
     with localcontext(dmath.CONTEXT):
         book, through = _book(rows, as_of)
+        profit = _profit(book) if mkt == "IN" else None  # US net income is already the parent's
         m: dict[str, Metric] = {
             f"revenue_cagr_{years}y_pct": _cagr(book, "revenue", years),
             f"net_income_cagr_{years}y_pct": _cagr(book, "net_income", years),
             f"eps_cagr_{years}y_pct": _cagr(book, "eps", years),
             **{f"revenue_yoy_q{n}_pct": _yoy(book, n) for n in range(4)},
             "revenue_growth_stdev_pp": _growth_stdev(book, years),
-            "net_margin_pct": _calc(book, ("net_income", "revenue"),
-                                    lambda g: _pct(g["net_income"], g["revenue"], "revenue")),
-            "roe_pct": _roe(book),
+            "net_margin_pct": _net_margin(book, profit),
+            "roe_pct": _labelled(
+                _roe(book, book.at("net_income") if profit is None else profit.value), profit
+            ),
         }  # fmt: skip
         if sector_kind == "financial":
             m.update(_bank_metrics(book))
         else:
             m.update(_general_metrics(book, mkt, cfg.fa.default_tax_rate_pct))
+        if mkt == "IN":
+            # growth, cash conversion and accruals stay on consolidated profit: attributable exists
+            # for the latest year only and CFO is consolidated, so the label says so
+            for name in (f"net_income_cagr_{years}y_pct", "cfo_to_pat", "accruals_ratio_pct"):
+                if name in m:
+                    m[name] = _stamp(m[name], profit_basis=CONSOLIDATED)
+            if revenue_basis:
+                for name in (f"revenue_cagr_{years}y_pct", "net_margin_pct"):
+                    m[name] = _stamp(m[name], revenue_basis=revenue_basis)
         m.update(_holding(shareholding, as_of, mkt))
         if sector_kind == "financial":
             m = {k: v for k, v in m.items() if k not in _NOT_FOR_FINANCIALS}

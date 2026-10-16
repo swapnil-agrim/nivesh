@@ -7,6 +7,7 @@ from collections import defaultdict
 from datetime import date
 from typing import Any
 
+from nivesh_adapters.providers import provider_sources
 from nivesh_core.market_store import (
     estimate_history,
     get_statement_rows,
@@ -63,8 +64,10 @@ def get_statements(
     keep = max(1, min(years, MAX_YEARS)) * (1 if period_type == "A" else 4)
     with common.market_ctx() as m:
         sec = _pick(m, security)
-        rows = [r for r in latest_as_of(get_statement_rows(m.duck, sec.id), cutoff)
-                if r.period_type == period_type]  # fmt: skip
+        stored = get_statement_rows(
+            m.duck, sec.id, cutoff, sources=provider_sources(m.settings.fundamentals)
+        )
+        rows = [r for r in latest_as_of(stored, cutoff) if r.period_type == period_type]
     by_end: dict[date, list[Any]] = defaultdict(list)
     for r in rows:
         by_end[r.period_end].append(r)
@@ -86,20 +89,24 @@ def get_statements(
 def get_ratios(security: str, period_type: str = "A", as_of: str | None = None) -> dict[str, Any]:
     """Operating and net margin, return on equity, debt to equity and revenue growth for the
     latest period known at `as_of`. A ratio with missing inputs is null and the inputs are
-    listed under `missing`."""
+    listed under `missing`. For India, net margin and ROE use the profit attributable to the
+    parent where it can be derived and `profit_basis` says which profit was used."""
     if period_type not in PERIOD_TYPES:
         raise ValueError("period_type must be A (annual) or Q (quarterly)")
     cutoff = _as_of(as_of)
     with common.market_ctx() as m:
         sec = _pick(m, security)
-        rows = get_statement_rows(m.duck, sec.id)
-    rs = ratios(rows, period_type, cutoff)  # type: ignore[arg-type]
+        rows = get_statement_rows(
+            m.duck, sec.id, cutoff, sources=provider_sources(m.settings.fundamentals)
+        )
+    rs = ratios(rows, period_type, cutoff, market=sec.market)  # type: ignore[arg-type]
     data = {
         **_head(sec),
         "period_end": rs.period_end.isoformat() if rs.period_end else None,
         "period_type": period_type,
         "ratios": {k: num(v) for k, v in rs.values.items()},
         "missing": rs.missing,
+        **({"profit_basis": rs.profit_basis} if rs.profit_basis else {}),  # India only
     }
     return env(data, rs.period_end, SOURCE)
 
@@ -158,7 +165,9 @@ def get_shareholding(security: str, quarters: int = 12) -> dict[str, Any]:
     with the filing date. Available for India listings only; empty otherwise."""
     with common.market_ctx() as m:
         sec = _pick(m, security)
-        found = stored_shareholding(m.duck, sec.id)
+        found = stored_shareholding(
+            m.duck, sec.id, sources=provider_sources(m.settings.fundamentals)
+        )
     rows = [
         {
             "period_end": s.period_end.isoformat(), "promoter_pct": num(s.promoter_pct),

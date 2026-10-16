@@ -6,13 +6,15 @@ from pathlib import Path
 import pytest
 
 from nivesh_adapters.mf_report import discover, fund_valuation, run_doctor, trailing_1y_pct
+from nivesh_core.fundamentals_config import FundamentalsSettings, PlanSettings, ProviderSpec
 from nivesh_core.market_models import PriceBar
-from nivesh_core.market_store import upsert_bars
+from nivesh_core.market_store import upsert_bars, write_fundamentals
 from nivesh_core.mf_models import FundHoldingRow, NavPoint
 from nivesh_core.mf_store import upsert_nav, write_fund_holdings, write_fund_meta
 from nivesh_core.security_master import build_master
 from nivesh_engine.fund_doctor import Action, ReasonCode
 from nivesh_engine.fund_screen import Constraints
+from nivesh_engine.statements import StatementRow
 from tests.market_fx import mrow
 from tests.mf_fx import (
     DG,
@@ -264,3 +266,33 @@ def test_discover_applies_requested_constraints_and_reports_unloaded(tmp_path: P
         assert any(line.startswith("999999") for line in rep.not_loaded)
         empty = discover(env.duck, env.sql, env.settings, "Debt", k)
         assert empty.result.ranked == [] and empty.result.reason == "no candidates in the category"
+
+
+# --- #131 provider order -------------------------------------------------------------------------
+
+
+def test_fund_valuation_uses_the_priority_provider_as_known_at_each_month_end(env: Env) -> None:
+    seed_valuation(env, 30)  # EPS 10 and 40 under an unlisted source: P/E 20 and 10 every month
+    alpha = env.master.by_isin(S1)[0].id
+
+    def eps(value: str) -> StatementRow:  # filed in the last month only
+        return StatementRow(
+            period_end=date(2021, 3, 31), period_type="A", item="eps", value=D(value),
+            currency="INR", filed_at=date(2025, 12, 15),
+        )  # fmt: skip
+
+    write_fundamentals(env.duck, alpha, [eps("20")], "tapetide")
+    write_fundamentals(env.duck, alpha, [eps("5")], "upstox")
+    fund = sid(env, "100001")
+    rep = fund_valuation(env.duck, env.settings, fund)
+    # December: tapetide's EPS 20 gives P/E 10 for both holdings; earlier months have only the
+    # older figure, which a priority row filed later must not hide (13.3333 = 100 / (2.5 + 5))
+    assert rep.pe is not None and rep.pe.value == D("10.0000")
+    assert rep.pe_history is not None and rep.pe_history.months_used == 29
+    assert rep.pe_history.median == D("13.3333")
+    order = [ProviderSpec(name="upstox"), ProviderSpec(name="tapetide", plan=PlanSettings(daily=9))]
+    flipped = env.settings.model_copy(
+        update={"fundamentals": FundamentalsSettings(providers=order)}
+    )
+    again = fund_valuation(env.duck, flipped, fund)
+    assert again.pe is not None and again.pe.value == D("16.0000")  # upstox EPS 5: P/E 40 and 10

@@ -66,3 +66,5 @@ per spec and unverified against live sources (deferred D2/D3). The parsers fail 
 `DataQualityError` on shapes they do not expect, so a wrong guess never becomes silent bad data.
 
 Update (2026-10-13): superseded as to the India source by ADR-0015 (Tapetide free tier is the primary, keyed on the NSE symbol; this BSE XBRL path is a fallback only, and the exchange endpoint answers HTTP 403 today).
+
+Update (2026-10-16): the India source is now one of several pluggable providers configured under `fundamentals.providers`, with a persistent vendor call ledger and attributable profit derived at read time; see ADR-0016.

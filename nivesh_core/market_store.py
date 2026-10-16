@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 
 import duckdb
 
@@ -264,89 +265,145 @@ def write_fundamentals(
     _in_txn(conn, work)
 
 
-def get_statement_rows(conn: duckdb.DuckDBPyConnection, security_id: int) -> list[StatementRow]:
-    """Every stored row (all `filed_at` versions); use `latest_as_of` for a point-in-time view."""
-    rows = conn.execute(
-        "SELECT period_end, period_type, item, value, currency, filed_at FROM fundamental "
-        "WHERE security_id = ? ORDER BY period_end, item, filed_at",
-        (security_id,),
-    ).fetchall()
-    return [
-        StatementRow(period_end=r[0], period_type=r[1], item=r[2], value=r[3], currency=r[4] or "",
-                     filed_at=r[5])
-        for r in rows
-    ]  # fmt: skip
+def _rank_by(sources: Sequence[str] | None) -> tuple[str, list[str]]:
+    """`CASE source WHEN ? THEN 0 ... ELSE n END` and its parameters: the position of a source in
+    `sources` (most trusted first) as SQL. The names are bound, never interpolated; an unlisted
+    source ranks after every listed one. No sources: no ranking (every source's rows)."""
+    if not sources:
+        return "", []
+    ranked = list(dict.fromkeys(sources))
+    whens = "".join(f" WHEN ? THEN {i}" for i in range(len(ranked)))
+    return f"CASE source{whens} ELSE {len(ranked)} END", ranked
 
 
-def get_shareholding(conn: duckdb.DuckDBPyConnection, security_id: int) -> list[ShareholdingRow]:
-    """One row per quarter (the latest filing), oldest first."""
-    rows = conn.execute(
-        "SELECT period_end, promoter_pct, promoter_pledged_pct, public_pct, filed_at "
-        "FROM shareholding WHERE security_id = ? "
-        "QUALIFY row_number() OVER (PARTITION BY period_end ORDER BY filed_at DESC) = 1 "
-        "ORDER BY period_end",
-        (security_id,),
-    ).fetchall()
-    return [
-        ShareholdingRow(period_end=r[0], promoter_pct=r[1], promoter_pledged_pct=r[2],
-                        public_pct=r[3], filed_at=r[4])
-        for r in rows
-    ]  # fmt: skip
+def _statement(r: Sequence[Any]) -> StatementRow:
+    """A row of (key, period_end, period_type, item, value, currency, filed_at)."""
+    return StatementRow(period_end=r[1], period_type=r[2], item=r[3], value=r[4],
+                        currency=r[5] or "", filed_at=r[6])  # fmt: skip
+
+
+def _holding(r: Sequence[Any]) -> ShareholdingRow:
+    """A row of (key, period_end, promoter_pct, promoter_pledged_pct, public_pct, filed_at)."""
+    return ShareholdingRow(period_end=r[1], promoter_pct=r[2], promoter_pledged_pct=r[3],
+                           public_pct=r[4], filed_at=r[5])  # fmt: skip
+
+
+def get_statement_rows(
+    conn: duckdb.DuckDBPyConnection,
+    security_id: int,
+    as_of: date | None = None,
+    *,
+    sources: Sequence[str] | None = None,
+) -> list[StatementRow]:
+    """Every stored row (all `filed_at` versions); use `latest_as_of` for a point-in-time view.
+    See `get_statement_rows_many` for `as_of` and `sources`."""
+    return get_statement_rows_many(conn, [security_id], as_of, sources=sources)[security_id]
+
+
+def get_shareholding(
+    conn: duckdb.DuckDBPyConnection,
+    security_id: int,
+    as_of: date | None = None,
+    *,
+    sources: Sequence[str] | None = None,
+) -> list[ShareholdingRow]:
+    """One row per quarter, oldest first. See `get_shareholding_many`."""
+    return get_shareholding_many(conn, [security_id], as_of, sources=sources)[security_id]
 
 
 def get_statement_rows_many(
-    conn: duckdb.DuckDBPyConnection, security_ids: Sequence[int], as_of: date | None = None
+    conn: duckdb.DuckDBPyConnection,
+    security_ids: Sequence[int],
+    as_of: date | None = None,
+    *,
+    sources: Sequence[str] | None = None,
 ) -> dict[int, list[StatementRow]]:
     """`get_statement_rows` for many securities: every `filed_at` version, restricted to rows
-    filed on or before `as_of` when given (no look-ahead)."""
+    filed on or before `as_of` when given (no look-ahead).
+
+    `sources` (most trusted first) keeps, per (security, period end, period type, item), only the
+    rows of the best-ranked source that has it AFTER the `as_of` filter, so a trusted source's
+    later filing never hides the figure that existed on that date. Every `filed_at` version of the
+    winning source stays (a restatement is still found by `latest_as_of`); a figure only a lower
+    source has is still returned. `None` (or none listed): every source's rows, as stored."""
     out: dict[int, list[StatementRow]] = {i: [] for i in security_ids}
+    case, ranked = _rank_by(sources)
+    qualify = (
+        f"QUALIFY dense_rank() OVER (PARTITION BY security_id, period_end, period_type, item "
+        f"ORDER BY {case}, source) = 1 "
+        if case
+        else ""
+    )
     for chunk in _chunks(security_ids):
         rows = conn.execute(
             "SELECT security_id, period_end, period_type, item, value, currency, filed_at "  # noqa: S608
             f"FROM fundamental WHERE security_id IN ({_marks(chunk)}) "
             "AND filed_at <= COALESCE(?, DATE '9999-12-31') "
-            "ORDER BY security_id, period_end, item, filed_at",
-            (*chunk, as_of),
+            f"{qualify}ORDER BY security_id, period_end, item, filed_at",
+            (*chunk, as_of, *ranked),
         ).fetchall()
         for r in rows:
-            out[r[0]].append(
-                StatementRow(
-                    period_end=r[1],
-                    period_type=r[2],
-                    item=r[3],
-                    value=r[4],
-                    currency=r[5] or "",
-                    filed_at=r[6],
-                )  # fmt: skip
-            )
+            out[r[0]].append(_statement(r))
     return out
 
 
 def get_shareholding_many(
-    conn: duckdb.DuckDBPyConnection, security_ids: Sequence[int], as_of: date | None = None
+    conn: duckdb.DuckDBPyConnection,
+    security_ids: Sequence[int],
+    as_of: date | None = None,
+    *,
+    sources: Sequence[str] | None = None,
 ) -> dict[int, list[ShareholdingRow]]:
-    """`get_shareholding` for many securities. `as_of` filters filings BEFORE the latest-per-quarter
-    pick, so a restatement filed after `as_of` never hides the filing that existed on it."""
+    """`get_shareholding` for many securities. `as_of` filters filings BEFORE the pick, so a
+    restatement filed after `as_of` never hides the filing that existed on it. The pick is one
+    whole row per quarter: the best-ranked source in `sources`, then its latest filing (a pledge
+    is never filled in from another provider's filing); `None`: the latest filing of any source."""
     out: dict[int, list[ShareholdingRow]] = {i: [] for i in security_ids}
+    case, ranked = _rank_by(sources)
+    order = f"{case}, filed_at DESC, source" if case else "filed_at DESC"
     for chunk in _chunks(security_ids):
         rows = conn.execute(
             "SELECT security_id, period_end, promoter_pct, promoter_pledged_pct, public_pct, "  # noqa: S608
             f"filed_at FROM shareholding WHERE security_id IN ({_marks(chunk)}) "
             "AND filed_at <= COALESCE(?, DATE '9999-12-31') "
             "QUALIFY row_number() OVER (PARTITION BY security_id, period_end "
-            "ORDER BY filed_at DESC) = 1 ORDER BY security_id, period_end",
-            (*chunk, as_of),
+            f"ORDER BY {order}) = 1 ORDER BY security_id, period_end",
+            (*chunk, as_of, *ranked),
         ).fetchall()
         for r in rows:
-            out[r[0]].append(
-                ShareholdingRow(
-                    period_end=r[1],
-                    promoter_pct=r[2],
-                    promoter_pledged_pct=r[3],
-                    public_pct=r[4],
-                    filed_at=r[5],
-                )  # fmt: skip
-            )
+            out[r[0]].append(_holding(r))
+    return out
+
+
+def get_statement_rows_by_source(
+    conn: duckdb.DuckDBPyConnection, security_id: int, as_of: date | None = None
+) -> dict[str, list[StatementRow]]:
+    """Every source's rows apart (all `filed_at` versions up to `as_of`), for `fundamentals
+    compare`: nothing is ranked, merged or averaged here."""
+    out: dict[str, list[StatementRow]] = {}
+    for r in conn.execute(
+        "SELECT source, period_end, period_type, item, value, currency, filed_at FROM fundamental "
+        "WHERE security_id = ? AND filed_at <= COALESCE(?, DATE '9999-12-31') "
+        "ORDER BY source, period_end, item, filed_at",
+        (security_id, as_of),
+    ).fetchall():
+        out.setdefault(r[0], []).append(_statement(r))
+    return out
+
+
+def get_shareholding_by_source(
+    conn: duckdb.DuckDBPyConnection, security_id: int, as_of: date | None = None
+) -> dict[str, list[ShareholdingRow]]:
+    """Each source's shareholding apart: its latest filing per quarter up to `as_of`."""
+    out: dict[str, list[ShareholdingRow]] = {}
+    for r in conn.execute(
+        "SELECT source, period_end, promoter_pct, promoter_pledged_pct, public_pct, filed_at "
+        "FROM shareholding WHERE security_id = ? AND filed_at <= COALESCE(?, DATE '9999-12-31') "
+        "QUALIFY row_number() OVER (PARTITION BY source, period_end ORDER BY filed_at DESC) = 1 "
+        "ORDER BY source, period_end",
+        (security_id, as_of),
+    ).fetchall():
+        out.setdefault(r[0], []).append(_holding(r))
     return out
 
 

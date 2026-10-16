@@ -1,0 +1,41 @@
+{
+  "_comment": "UNVERIFIED: hand-written from the public API documentation, not from a live response. Synthetic figures in crore for tests only; field names beyond the documented ones are guesses. expiry_date is read as the ex-date and the split ratio direction is a guess.",
+  "status": "success",
+  "data": {
+    "corporate_actions": [
+      {
+        "name": "Dividend",
+        "expiry_date": "14 Aug 2025",
+        "amount": 5.5,
+        "ratio": null,
+        "event_details": [
+          {
+            "label": "Record date",
+            "value": "14 Aug 2025"
+          }
+        ]
+      },
+      {
+        "name": "Bonus",
+        "expiry_date": "05 Jan 2026",
+        "amount": null,
+        "ratio": "1:1",
+        "event_details": []
+      },
+      {
+        "name": "Split",
+        "expiry_date": "10 Feb 2026",
+        "amount": null,
+        "ratio": "1:5",
+        "event_details": []
+      },
+      {
+        "name": "Rights",
+        "expiry_date": "20 Mar 2026",
+        "amount": 1250.0,
+        "ratio": "3:20",
+        "event_details": []
+      }
+    ]
+  }
+}

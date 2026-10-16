@@ -1,7 +1,9 @@
 """Tapetide adapter: transport, auth, error classification, pacing. Fixtures only, no network."""
 
 import json
-from datetime import date
+import sqlite3
+from contextlib import suppress
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,8 @@ from nivesh_adapters.cache import cached_fetch
 from nivesh_adapters.fundamentals_tapetide import (
     Statements,
     TapetideFundamentals,
+    _dec,
+    _real,
     face_value_of,
     map_shareholding,
     map_statements,
@@ -21,15 +25,33 @@ from nivesh_adapters.quality import DataQualityError
 from nivesh_core.config import Ttls
 from nivesh_core.db import init_stores
 from nivesh_core.db.duck import open_duck
-from nivesh_core.errors import RateLimited, SourceUnavailable
+from nivesh_core.errors import (
+    MarketDataError,
+    NotConfigured,
+    QuotaExceeded,
+    RateLimited,
+    SourceUnavailable,
+)
+from nivesh_core.quota import Budget
 from tests.conftest import MemoryKeyring
-from tests.tapetide_fx import Tapetide, adapter, client, envelope, inner, scheme, token
+from tests.tapetide_fx import (
+    Tapetide,
+    adapter,
+    client,
+    envelope,
+    inner,
+    ledger,
+    memory_budget,
+    scheme,
+    token,
+)
 
 QUARTERLY = {"resource": "financials", "symbol": "RELIANCE", "section": "quarterly"}
 
 
 @pytest.fixture(autouse=True)
-def _token(monkeypatch: pytest.MonkeyPatch) -> None:
+def _token(monkeypatch: pytest.MonkeyPatch, fake_keyring: MemoryKeyring) -> None:
+    """The env var wins in `get_secret`; the fake keychain keeps the real one out of every test."""
     monkeypatch.setenv("TAPETIDE_TOKEN", token())
 
 
@@ -119,8 +141,8 @@ def test_iserror_quota_text_with_retry_after_raises_ratelimited_and_halts() -> N
     srv.fail_all = httpx.Response(
         200, json=envelope("Error: denied", is_error=True), headers={"Retry-After": "3600"}
     )
-    ad = adapter(srv)
-    with pytest.raises(RateLimited, match="50 calls/day") as e:
+    ad = adapter(srv, budget=memory_budget(daily=400, monthly=5000))
+    with pytest.raises(RateLimited, match="400") as e:
         ad.fetch(**QUARTERLY)
     assert "00:00 IST" in str(e.value) and ad.halted
     with pytest.raises(RateLimited):
@@ -135,8 +157,8 @@ def test_iserror_quota_text_without_header_and_http_429_also_raise_ratelimited()
     ):
         srv = Tapetide()
         srv.fail_all = resp
-        with pytest.raises(RateLimited, match="free plan"):
-            adapter(srv).fetch(**QUARTERLY)
+        with pytest.raises(RateLimited, match="quota reached"):
+            adapter(srv, budget=memory_budget(daily=400, monthly=5000)).fetch(**QUARTERLY)
 
 
 def test_unknown_symbol_is_unavailable_not_empty_and_does_not_halt() -> None:
@@ -224,6 +246,7 @@ def test_calls_are_paced() -> None:
 
 def test_default_pacing_is_below_the_vendor_burst_limit() -> None:
     ad = TapetideFundamentals(client(Tapetide()))
+    ad.use_budget(memory_budget())
     ad.fetch(**QUARTERLY)  # first call is not delayed
     assert ad._limiter is not None and ad._limiter.interval >= 1.1 - 1e-9
 
@@ -506,6 +529,7 @@ def test_transport_failure_text_never_reaches_the_message_even_with_the_token_in
 
     ad = TapetideFundamentals(httpx.Client(transport=httpx.MockTransport(boom)),
                               limiter=adapter(Tapetide())._limiter)  # fmt: skip
+    ad.use_budget(memory_budget())
     with pytest.raises(SourceUnavailable) as e:
         ad.fetch(**QUARTERLY)
     assert token() not in str(e.value) and token()[:6] not in str(e.value)
@@ -651,3 +675,312 @@ def test_boolean_cell_is_a_data_quality_error_not_a_number(cell: bool) -> None:
     srv.fail_all = httpx.Response(200, json=envelope(sec))
     with pytest.raises(DataQualityError, match="finite number"):
         adapter(srv).fetch(**QUARTERLY)
+
+
+# --- #131 hardening ---
+
+
+@pytest.mark.parametrize(
+    "v",
+    [0, 1, 1.5, -3, 0.0, pytest.param(10**400, id="huge"), pytest.param(-(10**400), id="-huge")],
+)
+def test_real_is_a_finite_number_that_is_not_a_bool(v: Any) -> None:
+    assert _real(v) is True
+
+
+@pytest.mark.parametrize(
+    "v",
+    [True, False, None, "1", [1], {"a": 1}, float("nan"), float("inf"), float("-inf"), Decimal(1)],
+)
+def test_real_rejects_bools_text_containers_nan_inf_and_decimals(v: Any) -> None:
+    assert _real(v) is False
+
+
+def test_dec_of_a_huge_int_is_a_decimal_not_an_overflow() -> None:
+    assert _dec(10**400) == Decimal(10) ** 400  # math.isfinite(10**400) raises OverflowError
+    assert _dec(1.5) == Decimal("1.5") and _dec(True) is None and _dec(float("nan")) is None
+
+
+def _pledge_payload(pct: Any, status: str) -> dict[str, Any]:
+    payload = inner(Tapetide().misc["shareholding"])
+    payload["promoter_pledge"].update(pct_of_promoter_holding=pct, status=status)
+    return payload
+
+
+def test_unparsable_pledge_text_with_an_unknown_status_adds_exactly_one_skipped_line() -> None:
+    got = map_shareholding(_pledge_payload("abc", "unknown"), TODAY)
+    lines = [s for s in got.skipped if "promoter pledge" in s]
+    assert len(lines) == 1 and "not a number" in lines[0]
+    assert len(got.rows) == 8 and got.rows[-1].promoter_pledged_pct is None
+    assert got.rows[-1].promoter_pct == Decimal("50.48") and got.rows[-1].public_pct == Decimal(
+        "8.58"
+    )
+
+
+def test_status_none_keeps_pledge_zero_and_adds_no_line_and_a_null_pct_adds_none() -> None:
+    none = map_shareholding(_pledge_payload("abc", "none"), TODAY)
+    assert none.rows[-1].promoter_pledged_pct == Decimal(0)
+    assert not [s for s in none.skipped if "promoter pledge" in s]
+    null = map_shareholding(_pledge_payload(None, "unknown"), TODAY)
+    assert null.rows[-1].promoter_pledged_pct is None
+    assert not [s for s in null.skipped if "promoter pledge" in s]
+    good = map_shareholding(_pledge_payload(12.5, "pledged"), TODAY)
+    assert not [s for s in good.skipped if "promoter pledge" in s]
+
+
+def test_a_company_not_found_reply_marks_the_symbol_unknown_and_nothing_else_does() -> None:
+    def ask(text: str, **params: str) -> TapetideFundamentals:
+        srv = Tapetide()
+        srv.fail_all = httpx.Response(200, json=envelope(text, is_error=True))
+        ad = adapter(srv)
+        with pytest.raises(SourceUnavailable, match="Tapetide has no"):
+            ad.fetch(**{"resource": "financials", "symbol": "X", "section": "quarterly", **params})
+        return ad
+
+    assert ask("Error: Not found (tapetide-api): Company not found: X").unknown_symbols == {"X"}
+    assert ask("Error: Symbol not found: X").unknown_symbols == {"X"}
+    assert ask("Error: Section not found: quarterly").unknown_symbols == set()
+    shareholding = ask("Error: Company not found: X", resource="shareholding")
+    assert shareholding.unknown_symbols == set()  # only a statements reply short-circuits
+
+
+# --- #131 quota ---
+
+NOON = datetime(2026, 10, 9, 6, 30, tzinfo=UTC)  # 12:00 IST on 2026-10-09, not a month start
+
+
+def noon() -> datetime:
+    return NOON
+
+
+VENDOR_QUOTA_REPLIES = pytest.mark.parametrize(
+    "reply",
+    [
+        httpx.Response(429, text="slow down"),
+        httpx.Response(200, json=envelope(QUOTA_TEXT, is_error=True)),
+        httpx.Response(
+            200, json=envelope("Error: denied", is_error=True), headers={"Retry-After": "1"}
+        ),
+    ],
+    ids=["http-429", "quota-text", "retry-after"],
+)
+
+
+def counted(c: sqlite3.Connection) -> list[str | None]:
+    """Outcome of every real (non-manual) ledger row, in order; None while it is unsettled."""
+    return [r[0] for r in c.execute("SELECT outcome FROM vendor_call WHERE kind = 'call' "
+                                    "ORDER BY id")]  # fmt: skip
+
+
+def test_a_budgetless_adapter_refuses_to_post_and_does_not_read_the_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("TAPETIDE_TOKEN")  # were it read first, the message would name the token
+    srv = Tapetide()
+    ad = TapetideFundamentals(client(srv))
+    with pytest.raises(NotConfigured, match="quota budget") as e:
+        ad.fetch(**QUARTERLY)
+    assert "TAPETIDE_TOKEN" not in str(e.value) and ad.halted and srv.calls == 0
+    with pytest.raises(NotConfigured):  # halted: still nothing sent
+        ad.fetch(**QUARTERLY)
+    with pytest.raises(NotConfigured, match="quota budget"):  # the chokepoint itself, not `_call`
+        TapetideFundamentals(client(srv))._rpc("dummy", "get_financials", {"symbol": "X"})
+    assert srv.calls == 0
+
+
+def test_every_post_reserves_first_and_the_ledger_matches_the_requests(tmp_path: Path) -> None:
+    srv, c = Tapetide(), ledger(tmp_path / "l.sqlite")
+    other = sqlite3.connect(tmp_path / "l.sqlite")  # a second process looking at the ledger
+    seen: list[tuple[int, Any]] = []
+
+    def spy(req: httpx.Request) -> httpx.Response:
+        n, last = other.execute(
+            "SELECT COUNT(*), (SELECT outcome FROM vendor_call ORDER BY id DESC LIMIT 1) "
+            "FROM vendor_call"
+        ).fetchone()
+        seen.append((n, last))  # the row is committed, and not yet settled, when the POST leaves
+        return srv(req)
+
+    ad = adapter(spy, budget=memory_budget(c, daily=400, monthly=5000))
+    replies: list[httpx.Response | None] = [
+        None,
+        httpx.Response(200, json=envelope("Error: nope", is_error=True)),
+        httpx.Response(500),
+        httpx.Response(200, text="<html>bad gateway</html>"),
+        httpx.Response(429, text="slow down"),
+    ]
+    for reply in replies:
+        srv.fail_all = reply
+        with suppress(MarketDataError):
+            ad.fetch(**QUARTERLY)
+    assert srv.calls == 5 and seen == [(i, None) for i in range(1, 6)]
+    assert counted(c) == ["ok", "error", "error", "error", "halted"]
+    assert ad.calls == 1  # only the first reply was billed
+
+
+def test_a_refused_reserve_sends_nothing_and_halts_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    srv, c = Tapetide(), ledger()
+    b = memory_budget(c, daily=1, monthly=None)
+    ad = adapter(srv, budget=b)
+    ad.fetch(**QUARTERLY)  # the one call the plan allows
+    with pytest.raises(QuotaExceeded, match="daily quota reached: 1 of 1 used") as e:
+        ad.fetch(resource="shareholding", symbol="RELIANCE")
+    assert isinstance(e.value, RateLimited) and ad.halted and srv.calls == 1
+    monkeypatch.setattr(b, "reserve", lambda *a, **k: pytest.fail("a halted run must not reserve"))
+    for _ in range(2):
+        with pytest.raises(QuotaExceeded):
+            ad.fetch(**QUARTERLY)
+    assert srv.calls == 1 and counted(c) == ["ok"]
+
+
+def test_failed_and_garbage_replies_still_count_and_are_never_refunded() -> None:
+    srv, c = Tapetide(), ledger()
+    b = memory_budget(c)
+    ad = adapter(srv, budget=b)
+    for reply in (httpx.Response(500), httpx.Response(200, text="<html>x</html>"),
+                  httpx.Response(200, json=envelope("Error: nope", is_error=True))):  # fmt: skip
+        srv.fail_all = reply
+        with pytest.raises(SourceUnavailable):
+            ad.fetch(**QUARTERLY)
+    assert counted(c) == ["error"] * 3 and b.status().day.used == 3 and ad.calls == 0
+    srv.fail_all = httpx.Response(401, json=srv.misc["err_bad_token_401"])
+    with pytest.raises(SourceUnavailable, match="rejected"):
+        ad.fetch(**QUARTERLY)
+    assert counted(c)[-1] == "halted" and b.status().day.used == 4 and b.attempts == 4
+
+
+def test_no_token_and_halted_paths_never_reserve(monkeypatch: pytest.MonkeyPatch) -> None:
+    srv, c = Tapetide(), ledger()
+    monkeypatch.delenv("TAPETIDE_TOKEN")
+    ad = adapter(srv, budget=memory_budget(c))
+    with pytest.raises(NotConfigured, match="TAPETIDE_TOKEN"):
+        ad.fetch(**QUARTERLY)
+    assert counted(c) == [] and srv.calls == 0
+    monkeypatch.setenv("TAPETIDE_TOKEN", token())
+    srv.fail_all = httpx.Response(401, json=srv.misc["err_bad_token_401"])
+    ad = adapter(srv, budget=memory_budget(c))
+    for _ in range(3):
+        with pytest.raises(SourceUnavailable):
+            ad.fetch(**QUARTERLY)
+    assert counted(c) == ["halted"] and srv.calls == 1  # one reservation, then silence
+
+
+@VENDOR_QUOTA_REPLIES
+def test_vendor_quota_text_halts_and_the_message_carries_the_configured_plan(
+    reply: httpx.Response,
+) -> None:
+    srv = Tapetide()
+    srv.fail_all = reply
+    ad = adapter(srv, budget=memory_budget(daily=300, monthly=2000))
+    with pytest.raises(RateLimited) as e:
+        ad.fetch(**QUARTERLY)
+    msg = str(e.value)
+    assert "daily 300" in msg and "monthly 2,000" in msg and "00:00 IST" in msg and ad.halted
+    assert "free plan" not in msg and "50 calls/day" not in msg
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Error: monthly limit reached for this plan",
+        "Error: monthly cap hit",
+        "Error: 5000 calls allowed per month",
+    ],
+)
+def test_monthly_wording_also_halts_and_fills_the_month_not_the_day(text: str) -> None:
+    srv, c = Tapetide(), ledger()
+    srv.fail_all = httpx.Response(200, json=envelope(text, is_error=True))
+    b = memory_budget(c, daily=400, monthly=5000, now=noon)
+    ad = adapter(srv, budget=b)
+    with pytest.raises(RateLimited, match="quota reached") as e:
+        ad.fetch(**QUARTERLY)
+    assert not isinstance(e.value, QuotaExceeded) and ad.halted
+    st = b.status()
+    assert st.month.used == 5000 and st.day.used == 1  # the month is full; today is not
+
+
+def test_a_benign_monthly_word_is_not_a_quota_halt() -> None:
+    srv = Tapetide()
+    srv.fail_all = httpx.Response(200, json=envelope("Error: monthly report unavailable",
+                                                     is_error=True))  # fmt: skip
+    ad = adapter(srv)
+    with pytest.raises(SourceUnavailable, match="Tapetide error") as e:
+        ad.fetch(**QUARTERLY)
+    assert not isinstance(e.value, RateLimited) and not ad.halted
+
+
+@VENDOR_QUOTA_REPLIES
+def test_a_vendor_quota_halt_is_persisted_so_a_new_process_spends_nothing(
+    reply: httpx.Response,
+) -> None:
+    c, srv = ledger(), Tapetide()
+    srv.fail_all = reply
+    first = memory_budget(c, daily=400, monthly=5000, now=noon)
+    with pytest.raises(RateLimited):
+        adapter(srv, budget=first).fetch(**QUARTERLY)
+    assert srv.calls == 1 and first.status().day.used == 400  # today topped up to the cap
+    srv.fail_all = None
+    second = memory_budget(c, daily=400, monthly=5000, now=noon)  # a new process, the same ledger
+    with pytest.raises(QuotaExceeded, match="daily quota reached: 400 of 400 used"):
+        adapter(srv, budget=second).fetch(**QUARTERLY)
+    assert srv.calls == 1 and second.status().day.used == 400  # nothing spent, nothing added
+
+
+def test_a_halt_when_the_window_is_already_full_adds_no_manual_row() -> None:
+    c, srv = ledger(), Tapetide()
+    b = memory_budget(c, daily=2, monthly=None, now=noon, priority="holdings")
+    adapter(srv, budget=b).fetch(**QUARTERLY)
+    adapter(srv, budget=b).fetch(**QUARTERLY)  # now 2 of 2
+    assert b.status().day.used == 2
+    again = memory_budget(c, daily=5, monthly=None, now=noon, priority="holdings")
+    srv.fail_all = httpx.Response(
+        429, text="slow down"
+    )  # the vendor stops us at 2 of a belief of 5
+    with pytest.raises(RateLimited):
+        adapter(srv, budget=again).fetch(**QUARTERLY)
+    assert again.status().day.used == 5 and c.execute(
+        "SELECT COUNT(*) FROM vendor_call WHERE kind = 'manual'").fetchone() == (1,)  # fmt: skip
+
+
+class _LockedLedger:
+    """A ledger whose database is locked: every statement fails the way SQLite reports it."""
+
+    def execute(self, *args: Any, **kw: Any) -> Any:
+        raise sqlite3.OperationalError("database is locked")
+
+
+def test_an_unavailable_ledger_halts_with_a_reason_and_zero_requests() -> None:
+    srv = Tapetide()
+    ad = adapter(srv, budget=Budget(_LockedLedger(), "tapetide", memory_budget().plan))  # type: ignore[arg-type]
+    with pytest.raises(SourceUnavailable, match="quota ledger unavailable") as e:
+        ad.fetch(**QUARTERLY)
+    assert not isinstance(e.value, RateLimited) and ad.halted and srv.calls == 0
+    with pytest.raises(SourceUnavailable, match="quota ledger unavailable"):
+        ad.fetch(**QUARTERLY)
+    assert srv.calls == 0
+
+
+def test_a_ledger_that_fails_after_the_reply_does_not_lose_the_reply() -> None:
+    srv, c = Tapetide(), ledger()
+
+    class NoSettle(Budget):
+        def settle(self, call_id: int, outcome: Any) -> None:
+            raise sqlite3.OperationalError("database is locked")
+
+    plan = memory_budget().plan
+    res = adapter(srv, budget=NoSettle(c, "tapetide", plan)).fetch(**QUARTERLY)
+    assert res.data["section"] == "quarterly" and counted(c) == [None]  # counted, never lost
+
+
+def test_a_ledger_that_fails_while_recording_a_vendor_halt_still_halts() -> None:
+    srv, c = Tapetide(), ledger()
+    srv.fail_all = httpx.Response(429, text="slow down")
+
+    class NoExhaust(Budget):
+        def exhaust(self, window: Any) -> int:
+            raise sqlite3.OperationalError("database is locked")
+
+    ad = adapter(srv, budget=NoExhaust(c, "tapetide", memory_budget().plan))
+    with pytest.raises(RateLimited, match="quota reached") as e:
+        ad.fetch(**QUARTERLY)
+    assert "the configured plan" in str(e.value) and ad.halted and srv.calls == 1

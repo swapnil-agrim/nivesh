@@ -24,6 +24,7 @@ from decimal import Decimal, localcontext
 
 from nivesh_core.analysis_config import AnalysisSettings, DcfScenario
 from nivesh_engine import dmath
+from nivesh_engine.attributable import attributable_profit
 from nivesh_engine.metric import Metric, na, ok
 from nivesh_engine.statements import StatementRow, latest_as_of
 
@@ -362,12 +363,22 @@ def _cash_flow(inputs: ValuationInputs) -> Metric:
         ends = sorted((e for i, e in annual if i == "net_income"), reverse=True)
         if not ends:
             return na("no annual net_income filed (earnings are the cash flow for financials)")
-        return ok(annual[("net_income", ends[0])], basis="earnings", period_end=ends[0])
+        end, ni = ends[0], annual[("net_income", ends[0])]
+        if inputs.market != "IN":  # US net income is already the parent's
+            return ok(ni, basis="earnings", period_end=end)
+        profit = attributable_profit(  # the profit of the same year, never another year's EPS
+            ni, minority_interest=annual.get(("minority_interest", end)),
+            eps=annual.get(("eps", end)), shares_out=annual.get(("shares_out", end)),
+        )  # fmt: skip
+        # the net income is in hand, so the value is never None (`ok` would only retype it)
+        return Metric(profit.value, True, None, {"basis": "earnings", "period_end": end,
+                                                 **profit.inputs()})  # fmt: skip
     ends = sorted((e for i, e in annual if i == "cfo" and ("capex", e) in annual), reverse=True)
     if not ends:
         return na("no annual cfo and capex filed for the same year (free cash flow)")
     cfo, capex = annual[("cfo", ends[0])], abs(annual[("capex", ends[0])])
-    return ok(cfo - capex, basis="fcf", period_end=ends[0], cfo=cfo, capex=capex)
+    scope = {"scope": "consolidated"} if inputs.market == "IN" else {}  # includes the minority
+    return ok(cfo - capex, basis="fcf", period_end=ends[0], cfo=cfo, capex=capex, **scope)
 
 
 def valuation_range(inputs: ValuationInputs, *, cfg: AnalysisSettings) -> RangeResult:
@@ -421,6 +432,8 @@ def valuation_range(inputs: ValuationInputs, *, cfg: AnalysisSettings) -> RangeR
         "price": None if price is None else price[1],
         "price_date": None if price is None else price[0],
     }  # fmt: skip
+    if "profit_basis" in cf.inputs:  # India earnings DCF: which profit the cash flow is
+        assumptions["profit_basis"] = cf.inputs["profit_basis"]
     return RangeResult(inputs.as_of, cf, implied, scenarios, assumptions)
 
 

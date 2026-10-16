@@ -1,0 +1,61 @@
+{
+  "_comment": "UNVERIFIED: hand-written from the public API documentation, not from a live response. Synthetic figures in crore for tests only; field names beyond the documented ones are guesses.",
+  "status": "success",
+  "data": {
+    "units_in": "crore",
+    "type": "consolidated",
+    "history": [
+      {
+        "period": "Mar 2025",
+        "total_asset": 2100.5,
+        "total_liability": 1300.25
+      },
+      {
+        "period": "Mar 2026",
+        "total_asset": 2400.75,
+        "total_liability": 1450.5
+      }
+    ],
+    "full_statement": [
+      {
+        "name": "Equity Capital",
+        "history": [
+          {
+            "period": "Mar 2025",
+            "value": 67.5
+          },
+          {
+            "period": "Mar 2026",
+            "value": 67.5
+          }
+        ]
+      },
+      {
+        "name": "Reserves",
+        "history": [
+          {
+            "period": "Mar 2025",
+            "value": 732.75
+          },
+          {
+            "period": "Mar 2026",
+            "value": 950.25
+          }
+        ]
+      },
+      {
+        "name": "Total Assets",
+        "history": [
+          {
+            "period": "Mar 2025",
+            "value": 2100.5
+          },
+          {
+            "period": "Mar 2026",
+            "value": 2400.75
+          }
+        ]
+      }
+    ]
+  }
+}

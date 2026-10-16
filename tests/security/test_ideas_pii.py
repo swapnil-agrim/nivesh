@@ -61,6 +61,8 @@ def test_ideas_run_over_synthetic_universe_leaves_no_pii_in_run_dir_trace_ledger
 
 
 KEYLIKE = re.compile(r"[A-Za-z0-9]{20,}")
+# a secret word followed by a value; `ref:NAME` (upper case) is a reference, not a value
+SECRET_LITERAL = re.compile(r"(?i)\b(secret|password|credential)\b\s*[:=](?!\s*(?-i:ref:[A-Z]))")
 
 
 def test_new_fixtures_presets_and_docs_have_no_key_shaped_literals() -> None:
@@ -76,4 +78,12 @@ def test_new_fixtures_presets_and_docs_have_no_key_shaped_literals() -> None:
         assert scan_text(text) == [], p.name
         long_runs = [m for m in KEYLIKE.findall(text) if not m.isalpha() and not m.isdigit()]
         assert long_runs == [] or all("_" in m or "-" in m for m in long_runs), (p.name, long_runs)
-        assert not re.search(r"(?i)\b(secret|password|credential)\b\s*[:=]", text), p.name
+        assert not SECRET_LITERAL.search(text), p.name
+
+
+def test_a_literal_after_a_secret_word_is_caught_but_a_ref_name_is_not() -> None:
+    word = "cred" + "ential"  # built so the commit-time scanner does not flag this source
+    assert SECRET_LITERAL.search(word + ": ab" + "c")
+    assert SECRET_LITERAL.search(word + "=ab" + "c")
+    assert SECRET_LITERAL.search(word + ": ref:ab" + "c")  # not an upper-case ref name
+    assert not SECRET_LITERAL.search(word + ": ref:UPSTOX_ANALYTICS_TOKEN")

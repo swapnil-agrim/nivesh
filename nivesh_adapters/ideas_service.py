@@ -100,7 +100,13 @@ def shortlist_for(
     resolved = resolve_universe(duck, sql, settings, profile, market, day)
     cfg = settings.analysis
     stocks = load_screen_inputs(
-        duck, sql, resolved.ids, day, cfg, needs=inputs_needed(r.metric for r in rules.rules)
+        duck,
+        sql,
+        resolved.ids,
+        day,
+        cfg,
+        needs=inputs_needed(r.metric for r in rules.rules),
+        fundamentals=settings.fundamentals,
     )
     try:
         found = screen(stocks, rules, as_of=day, cfg=cfg, basis=resolved.basis)

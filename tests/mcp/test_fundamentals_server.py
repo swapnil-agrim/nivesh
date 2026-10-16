@@ -4,6 +4,8 @@ from decimal import Decimal
 import pytest
 from fastmcp.exceptions import ToolError
 
+import nivesh_mcp.common as common
+from nivesh_core.fundamentals_config import FundamentalsSettings, PlanSettings, ProviderSpec
 from nivesh_core.market_models import ShareholdingRow
 from nivesh_core.market_store import write_estimates, write_fundamentals
 from nivesh_core.pii_scan import scan_text
@@ -107,6 +109,8 @@ async def test_get_ratios_from_stored_statements_and_lists_missing_inputs(mkt: M
     assert d["period_end"] == "2024-03-31" and d["period_type"] == "A" and d["missing"] == []
     assert d["ratios"]["operating_margin"] == pytest.approx(200 / 1400, abs=1e-4)
     assert d["ratios"]["revenue_growth"] is not None
+    assert d["profit_basis"] == "consolidated_minority_unknown"  # India, no EPS x shares filed
+    assert d["ratios"]["roe"] == pytest.approx(150 / 500)  # still the consolidated ratio, labelled
     with mkt.duck() as c:
         write_fundamentals(c, mkt.ids["TCS"], [srow("revenue", "10", "2025-03-31")], "bse_xbrl")
     thin = await call("fundamentals", "get_ratios", security="TCS")
@@ -219,3 +223,84 @@ async def test_edgar_companyfacts_statements_and_ratios_have_no_share_only_perio
         assert got["debt_to_equity"] is not None  # the fixture's quarter has balance sheet only
         if ptype == "A":
             assert all(got[k] is not None for k in ("operating_margin", "net_margin", "roe"))
+
+
+# --- #131 provider order -------------------------------------------------------------------------
+
+
+def two_providers(m: Mkt) -> int:
+    """tapetide filed in September, upstox in June: different figures for the same year."""
+    sid = m.ids["RELIANCE"]
+    mine = {"tapetide": ("1000", "100", "2025-09-01", "50.5"),
+            "upstox": ("900", "80", "2025-06-01", "49.5")}  # fmt: skip
+    with m.duck() as c:
+        for source, (revenue, income, filed, promoter) in mine.items():
+            rows = [srow("revenue", revenue, "2025-03-31", filed=filed),
+                    srow("net_income", income, "2025-03-31", filed=filed),
+                    srow("total_equity", "500", "2025-03-31", filed=filed)]  # fmt: skip
+            sh = ShareholdingRow(period_end=date(2025, 3, 31), promoter_pct=D(promoter),
+                                 filed_at=date.fromisoformat(filed))  # fmt: skip
+            write_fundamentals(c, sid, rows, source, shareholding=[sh])
+    return sid
+
+
+def flip_provider_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    order = [ProviderSpec(name="upstox"), ProviderSpec(name="tapetide", plan=PlanSettings(daily=9))]
+    flipped = common.settings().model_copy(
+        update={"fundamentals": FundamentalsSettings(providers=order)}
+    )
+    monkeypatch.setattr(common, "settings", lambda: flipped)
+
+
+async def test_tools_answer_with_the_first_configured_provider_and_flip_with_the_order(
+    mkt: Mkt, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    two_providers(mkt)
+    first = await call("fundamentals", "get_statements", security="RELIANCE")
+    assert first["data"]["periods"][0]["values"]["revenue"] == 1000.0  # tapetide first
+    roe = (await call("fundamentals", "get_ratios", security="RELIANCE"))["data"]["ratios"]["roe"]
+    held = await call("fundamentals", "get_shareholding", security="RELIANCE")
+    assert roe == pytest.approx(0.2) and held["data"]["quarters"][0]["promoter_pct"] == 50.5
+    flip_provider_order(monkeypatch)
+    second = await call("fundamentals", "get_statements", security="RELIANCE")
+    assert second["data"]["periods"][0]["values"]["revenue"] == 900.0
+    roe = (await call("fundamentals", "get_ratios", security="RELIANCE"))["data"]["ratios"]["roe"]
+    held = await call("fundamentals", "get_shareholding", security="RELIANCE")
+    assert roe == pytest.approx(0.16) and held["data"]["quarters"][0]["promoter_pct"] == 49.5
+
+
+async def test_as_of_falls_back_to_the_provider_that_had_filed_by_then(mkt: Mkt) -> None:
+    two_providers(mkt)  # the priority provider filed on 2025-09-01
+    early = await call("fundamentals", "get_statements", security="RELIANCE", as_of="2025-07-01")
+    p = early["data"]["periods"][0]
+    assert p["values"]["revenue"] == 900.0 and p["filed_at"] == "2025-06-01"  # not hidden
+    r = await call("fundamentals", "get_ratios", security="RELIANCE", as_of="2025-07-01")
+    assert r["data"]["ratios"]["roe"] == pytest.approx(0.16)
+    late = await call("fundamentals", "get_statements", security="RELIANCE", as_of="2025-10-01")
+    assert late["data"]["periods"][0]["values"]["revenue"] == 1000.0
+
+
+# --- #131 attributable profit ---------------------------------------------------------------------
+
+
+async def test_get_ratios_india_uses_the_attributable_profit_and_names_the_basis(mkt: Mkt) -> None:
+    sid = seed_reliance(mkt)
+    extra = [srow("eps", "0.8", "2024-03-31"), srow("shares_out", "100", "2024-03-31")]
+    with mkt.duck() as c:  # EPS x shares = 80 against a consolidated net income of 150: +87.5%
+        write_fundamentals(c, sid, extra, "bse_xbrl")
+    d = (await call("fundamentals", "get_ratios", security="RELIANCE"))["data"]
+    assert d["profit_basis"] == "eps_x_shares"
+    assert d["ratios"]["roe"] == pytest.approx(80 / 500)
+    assert d["ratios"]["net_margin"] == pytest.approx(80 / 1400, abs=1e-4)
+    early = await call("fundamentals", "get_ratios", security="RELIANCE", as_of="2024-06-30")
+    older = early["data"]
+    assert older["profit_basis"] == "consolidated_minority_unknown"  # no EPS filed that early
+
+
+async def test_get_ratios_us_output_has_no_profit_basis_key(mkt: Mkt) -> None:
+    items = {"revenue": "1000", "net_income": "125", "eps": "1", "shares_out": "100"}
+    rows = [srow(item, value, "2025-03-31", cur="USD") for item, value in items.items()]
+    with mkt.duck() as c:
+        write_fundamentals(c, mkt.ids["AAPL"], rows, "edgar")
+    d = (await call("fundamentals", "get_ratios", security="AAPL"))["data"]
+    assert d["ratios"]["net_margin"] == pytest.approx(0.125) and "profit_basis" not in d

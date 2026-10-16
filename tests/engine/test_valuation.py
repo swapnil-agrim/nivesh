@@ -366,12 +366,17 @@ def test_india_fcf_yield_and_dcf_range_on_reliance_use_tapetide_free_cash_flow()
     assert rng.implied_growth.available or rng.implied_growth.reason
 
 
-def test_india_bank_dcf_uses_net_income_and_has_no_fcf_yield() -> None:
+def test_india_bank_dcf_uses_attributable_profit_and_has_no_fcf_yield() -> None:
     inp = india_inputs("HDFCBANK", "financial")
     na_with(current_multiples(inp)["fcf_yield_pct"], "financials")
     rng = valuation_range(inp, cfg=CFG)
     assert rng.cash_flow.available and rng.cash_flow.inputs["basis"] == "earnings"
-    close(rng.cash_flow, str(D(79219) * 10**7), D("1"))  # includes minority interest (ADR-0015)
+    # EPS 49.39 x 1539 crore shares = 76011.21 crore; it was the consolidated 79219 crore (#131)
+    close(rng.cash_flow, str(D("76011.21") * 10**7), D("1"))
+    ins = rng.cash_flow.inputs
+    assert ins["profit_basis"] == "eps_x_shares" and ins["profit_gap_pct"] == D("4.22")
+    assert ins["net_income_consolidated"] == D(79219) * 10**7 and "profit_reason" not in ins
+    assert rng.assumptions["profit_basis"] == "eps_x_shares"
     assert rng.scenarios["base"].per_share.available
 
 
@@ -379,3 +384,72 @@ def test_india_pb_history_is_unavailable_before_the_first_filed_share_count() ->
     rows = [r for r in tx.recorded_rows("RELIANCE") if r.item != "shares_out"]
     inp = ValuationInputs("IN", "general", INDIA_ASOF, tuple(rows), (), INDIA_CLOSE)
     na_with(current_multiples(inp)["pb"], "shares_out")
+
+
+# ---- attributable profit in the bank DCF (#131) -------------------------------------------------
+def bank_rows(**items: str | int) -> list[StatementRow]:
+    """India bank, FY ending 2023-12-31: consolidated net income 125 against EPS 1 x 100 shares;
+    a value of "x" drops that item."""
+    book: dict[str, list[str | int]] = {"net_income": [125], "eps": [1], "shares_out": [100]}
+    book |= {k: [v] for k, v in items.items()}
+    return annual_rows(book, currency="INR")
+
+
+def bank_range(rows: list[StatementRow], market: str = "IN"):  # type: ignore[no-untyped-def]
+    return valuation_range(inputs(rows, "60", market=market, kind="financial"), cfg=flat_cfg())
+
+
+def test_india_bank_dcf_falls_back_to_the_consolidated_figure_labelled_with_the_reason() -> None:
+    for rows, why in [
+        (bank_rows(eps="x"), "no eps"),
+        (bank_rows(shares_out="x"), "no shares_out"),
+        (bank_rows(net_income=90), "-10.00% against EPS x shares"),
+    ]:
+        res = bank_range(rows)
+        ni = next(r.value for r in rows if r.item == "net_income")
+        close(res.cash_flow, str(ni))  # computed on the consolidated figure, not dropped
+        ins = res.cash_flow.inputs
+        assert ins["profit_basis"] == "consolidated_minority_unknown", why
+        assert why in str(ins["profit_reason"]) and ins["net_income_consolidated"] == ni
+        assert res.assumptions["profit_basis"] == "consolidated_minority_unknown"
+        assert res.scenarios["base"].equity_value.available
+
+
+def test_india_bank_dcf_prefers_a_reported_minority_and_records_a_small_gap() -> None:
+    reported = bank_range(bank_rows(minority_interest=20))
+    close(reported.cash_flow, "105")
+    assert reported.cash_flow.inputs["profit_basis"] == "reported_minority"
+    quiet = bank_range(bank_rows(net_income=102))  # +2.00 percent
+    close(quiet.cash_flow, "102")
+    assert quiet.cash_flow.inputs["profit_basis"] == "consolidated_no_minority_detected"
+    assert quiet.cash_flow.inputs["profit_gap_pct"] == D("2.00")
+
+
+def test_attributable_profit_is_read_from_the_year_of_the_net_income_used() -> None:
+    old = [strow("eps", 1, date(2022, 12, 31), currency="INR"),
+           strow("shares_out", 100, date(2022, 12, 31), currency="INR")]  # fmt: skip
+    res = bank_range([*annual_rows({"net_income": [100, 125]}, currency="INR"), *old])
+    close(res.cash_flow, "125")  # FY2023 has no EPS: the older EPS is not borrowed
+    assert res.cash_flow.inputs["profit_basis"] == "consolidated_minority_unknown"
+
+
+def test_non_positive_attributable_cash_flow_is_still_unavailable_with_the_reason() -> None:
+    res = bank_range(bank_rows(minority_interest=130))  # 125 - 130
+    na_with(res.cash_flow, "non-positive cash flow")
+    assert res.cash_flow.inputs["profit_basis"] == "reported_minority"
+
+
+def test_us_bank_dcf_is_untouched_by_eps_and_shares_and_never_labelled() -> None:
+    res = bank_range(annual_rows({"net_income": [125], "eps": [1], "shares_out": [100]}), "US")
+    close(res.cash_flow, "125")
+    assert set(res.cash_flow.inputs) == {"basis", "period_end"}
+    assert "profit_basis" not in res.assumptions
+
+
+def test_the_fcf_dcf_stays_consolidated_and_says_so_for_india_only() -> None:
+    india = valuation_range(inputs(fcf_rows(), "60", market="IN"), cfg=flat_cfg())
+    close(india.cash_flow, "100")
+    assert india.cash_flow.inputs["scope"] == "consolidated"
+    assert "profit_basis" not in india.cash_flow.inputs and "profit_basis" not in india.assumptions
+    us = valuation_range(inputs(fcf_rows(), "60"), cfg=flat_cfg())
+    assert "scope" not in us.cash_flow.inputs

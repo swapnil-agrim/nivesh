@@ -214,3 +214,9 @@ a 3-year growth rate: disclosed, not corrected.
   Indian phone number (5-5 shape) to the PII scanner, so a digest could collide with the scanner.
   It is unrelated to flaky issue #113, which is a random multipart boundary containing a run of
   nine or more digits.
+
+Update (2026-10-16): the plan limits recorded above (50 calls a day, 1,000 a month, 60 calls a minute) are the free plan's figures as observed on 2026-10-13 and stay as recorded history. Limits are now owner configuration under `fundamentals.providers` (the owner moved to the Starter plan: defaults 400 a day and 5,000 a month), enforced by a persistent call ledger and shown by `nivesh quota status`; every message and the `market fundamentals` calls line are built from the configured plan. See ADR-0016 D3 to D7 and D13.
+
+Update (2026-10-16): the EPS-times-shares ingest note (D11, and the attributable-net-income half of X1) is retired in favour of attributable profit derived when `fa` reads the rows: a reported minority interest, else EPS times shares of the same fiscal year, with the basis and the gap in each metric's inputs, and consolidated figures labelled where it cannot be derived. `fa` now reports RELIANCE ROE at about 9.25% against 10.96% consolidated; the caveat in D11 is history. See ADR-0016 D10. The EBITDA half of X1 (through Tapetide's Operating Profit) stays open, and the per-company quota guard across runs named in X4 now exists as the per-vendor call ledger (ADR-0016 D3 to D7); the ratios-section half of X4 stays open.
+
+Update (2026-10-16): the India source is now one of several providers behind a small interface and the `fundamentals.providers` config block, read by priority, with a `nivesh fundamentals compare` cross-check; the Tapetide adapter itself is otherwise as decided here. See ADR-0016 D1, D2 and D8.

@@ -1,3 +1,4 @@
+import inspect
 import sqlite3
 from datetime import date
 from decimal import Decimal
@@ -9,9 +10,12 @@ import pytest
 
 import nivesh_mcp.common as common
 from nivesh_adapters.analysis_data import (
+    _market_cap,
     benchmark_for,
     load_bars,
     load_estimates,
+    load_flag_inputs,
+    load_peer_multiples,
     load_peers,
     load_screen_inputs,
     load_shareholding,
@@ -23,6 +27,7 @@ from nivesh_adapters.analysis_data import (
 from nivesh_core.analysis_config import AnalysisSettings
 from nivesh_core.db import MIGRATIONS, init_stores, migrate
 from nivesh_core.db.sqlite import open_sqlite
+from nivesh_core.fundamentals_config import FundamentalsSettings, PlanSettings, ProviderSpec
 from nivesh_core.market_models import CorpAction, PriceBar, ShareholdingRow
 from nivesh_core.market_store import (
     get_bars,
@@ -49,6 +54,7 @@ from tests.market_fx import mrow
 from tests.mcp.mkt_fx import NOW, Mkt, call, seed_master
 
 D = Decimal
+FUND = FundamentalsSettings()
 
 
 @pytest.fixture
@@ -229,7 +235,9 @@ def test_security_without_bars_gets_an_empty_list_not_an_error(
     db: duckdb.DuckDBPyConnection,
 ) -> None:
     assert load_bars(db, [7, 8]) == {7: [], 8: []}
-    assert load_statements(db, [7]) == {7: []} and load_shareholding(db, [7]) == {7: []}
+    assert load_statements(db, [7], fundamentals=FUND) == {7: []} and load_shareholding(
+        db, [7], fundamentals=FUND
+    ) == {7: []}
     assert load_estimates(db, [7]) == {7: []}
 
 
@@ -246,8 +254,10 @@ def test_loader_statement_and_shareholding_wrappers_pass_as_of(
 ) -> None:
     put_rows(db, srow(1, "revenue", "100", "2024-03-31", "2024-06-01"),
              srow(1, "revenue", "110", "2024-03-31", "2024-09-01"))  # fmt: skip
-    assert [r.value for r in load_statements(db, [1], as_of=date(2024, 7, 1))[1]] == [D(100)]
-    assert len(load_statements(db, [1])[1]) == 2
+    assert [
+        r.value for r in load_statements(db, [1], as_of=date(2024, 7, 1), fundamentals=FUND)[1]
+    ] == [D(100)]
+    assert len(load_statements(db, [1], fundamentals=FUND)[1]) == 2
 
 
 def test_to_bars_scales_open_high_low_by_the_adjustment_factor_and_volume_inversely() -> None:
@@ -425,7 +435,68 @@ def test_loaders_classify_a_deposit_taker_as_financial_without_a_sector(
         srow(plain, "revenue", "900", "2024-03-31", "2024-05-01"),
     )
     cfg, asof = AnalysisSettings(), date(2024, 6, 30)
-    kinds = load_valuation_inputs(db, conn, [bank, plain], asof, cfg, history=False)
+    kinds = load_valuation_inputs(
+        db, conn, [bank, plain], asof, cfg, history=False, fundamentals=FUND
+    )
     assert (kinds[bank].sector_kind, kinds[plain].sector_kind) == ("financial", "general")
-    screen = load_screen_inputs(db, conn, [bank, plain], asof, cfg, needs={"statements"})
+    screen = load_screen_inputs(
+        db, conn, [bank, plain], asof, cfg, needs={"statements"}, fundamentals=FUND
+    )
     assert (screen[bank].sector_kind, screen[plain].sector_kind) == ("financial", "general")
+
+
+# --- #131 provider order -------------------------------------------------------------------------
+def order(*names: str) -> FundamentalsSettings:
+    plan = PlanSettings(daily=400)
+    return FundamentalsSettings(providers=[
+        ProviderSpec(name=n, plan=plan if n == "tapetide" else None) for n in names
+    ])  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "loader",
+    [load_statements, load_shareholding, load_valuation_inputs, load_flag_inputs,
+     load_screen_inputs, load_peer_multiples, _market_cap],
+)  # fmt: skip
+def test_fundamentals_is_a_required_keyword_on_every_loader(loader: Any) -> None:
+    """A default would silently ignore the configured provider order, so mypy must see a miss."""
+    p = inspect.signature(loader).parameters["fundamentals"]
+    assert p.kind is p.KEYWORD_ONLY and p.default is p.empty
+
+
+def test_loaders_read_the_figure_of_the_first_configured_provider(
+    db: duckdb.DuckDBPyConnection,
+) -> None:
+    write_fundamentals(db, 1, [srow(1, "net_income", "100", "2024-03-31", "2024-05-01")[1]],
+                       "tapetide")  # fmt: skip
+    write_fundamentals(db, 1, [srow(1, "net_income", "80", "2024-03-31", "2024-05-01")[1]],
+                       "upstox")  # fmt: skip
+    first = load_statements(db, [1], fundamentals=order("tapetide", "upstox"))
+    flipped = load_statements(db, [1], fundamentals=order("upstox", "tapetide"))
+    assert [r.value for r in first[1]] == [D(100)] and [r.value for r in flipped[1]] == [D(80)]
+    q = date(2024, 3, 31)
+    write_fundamentals(db, 1, [], "tapetide", shareholding=[
+        ShareholdingRow(period_end=q, promoter_pct=D(50), filed_at=date(2024, 5, 1))])  # fmt: skip
+    write_fundamentals(db, 1, [], "upstox", shareholding=[
+        ShareholdingRow(period_end=q, promoter_pct=D(49), filed_at=date(2024, 5, 1))])  # fmt: skip
+    held = load_shareholding(db, [1], fundamentals=order("tapetide", "upstox"))
+    assert [h.promoter_pct for h in held[1]] == [D(50)]
+    held = load_shareholding(db, [1], fundamentals=order("upstox", "tapetide"))
+    assert [h.promoter_pct for h in held[1]] == [D(49)]
+
+
+def test_screen_inputs_carry_the_revenue_basis_of_the_india_statements_provider(
+    master: tuple[sqlite3.Connection, dict[str, int]], db: duckdb.DuckDBPyConnection
+) -> None:
+    conn, ids = master
+    india, us = ids["BBB"], ids["USW"]
+    asof = date(2024, 6, 30)
+    got = load_screen_inputs(db, conn, [india, us], asof, AnalysisSettings(), needs={"statements"},
+                             fundamentals=FUND)  # fmt: skip
+    assert got[india].revenue_basis is not None and "net sales" in got[india].revenue_basis
+    assert got[us].revenue_basis is None  # not declared for the US
+    other = order("upstox")
+    again = load_screen_inputs(db, conn, [india], asof, AnalysisSettings(), needs=set(),
+                               fundamentals=other)  # fmt: skip
+    assert again[india].revenue_basis is not None
+    assert again[india].revenue_basis != got[india].revenue_basis  # follows the configured order

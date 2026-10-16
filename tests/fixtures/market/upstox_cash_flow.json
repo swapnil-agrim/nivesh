@@ -1,0 +1,49 @@
+{
+  "_comment": "UNVERIFIED: hand-written from the public API documentation, not from a live response. Synthetic figures in crore for tests only; field names beyond the documented ones are guesses.",
+  "status": "success",
+  "data": {
+    "units_in": "crore",
+    "type": "consolidated",
+    "categories": [
+      {
+        "category": "operating",
+        "history": [
+          {
+            "period": "Mar 2025",
+            "value": 210.5
+          },
+          {
+            "period": "Mar 2026",
+            "value": 240.25
+          }
+        ]
+      },
+      {
+        "category": "investing",
+        "history": [
+          {
+            "period": "Mar 2025",
+            "value": -120.0
+          },
+          {
+            "period": "Mar 2026",
+            "value": -135.5
+          }
+        ]
+      },
+      {
+        "category": "financing",
+        "history": [
+          {
+            "period": "Mar 2025",
+            "value": -60.25
+          },
+          {
+            "period": "Mar 2026",
+            "value": -70.0
+          }
+        ]
+      }
+    ]
+  }
+}

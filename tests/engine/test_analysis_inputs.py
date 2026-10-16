@@ -16,6 +16,7 @@ from nivesh_adapters.analysis_data import (
 from nivesh_core.analysis_config import AnalysisSettings
 from nivesh_core.db import MIGRATIONS, init_stores, migrate
 from nivesh_core.db.sqlite import open_sqlite
+from nivesh_core.fundamentals_config import FundamentalsSettings
 from nivesh_core.market_models import CorpAction, PriceBar
 from nivesh_core.market_store import (
     filing_items_many,
@@ -31,6 +32,7 @@ from tests.analysis_fx import annual_rows, share_rows, strow
 from tests.market_fx import mrow
 
 D = Decimal
+FUND = FundamentalsSettings()
 CFG = AnalysisSettings()
 
 
@@ -109,13 +111,17 @@ def test_valuation_inputs_use_only_rows_filed_by_as_of_and_label_market_and_kind
     put(db, ids["AAA"], rows)
     put(db, ids["BNK"], rows)
     upsert_bars(db, [bar(ids["AAA"], "2024-03-28", "80")])
-    got = load_valuation_inputs(db, sql, [ids["AAA"], ids["BNK"], 99999], date(2023, 12, 31), CFG)
+    got = load_valuation_inputs(
+        db, sql, [ids["AAA"], ids["BNK"], 99999], date(2023, 12, 31), CFG, fundamentals=FUND
+    )
     assert set(got) == {ids["AAA"], ids["BNK"]}
     a = got[ids["AAA"]]
     assert a.market == "IN" and a.sector_kind == "general" and a.as_of == date(2023, 12, 31)
     assert {r.period_end.year for r in a.rows} == {2022} and a.last_close is None
     assert got[ids["BNK"]].sector_kind == "financial"
-    late = load_valuation_inputs(db, sql, [ids["AAA"]], date(2024, 3, 31), CFG)[ids["AAA"]]
+    late = load_valuation_inputs(db, sql, [ids["AAA"]], date(2024, 3, 31), CFG, fundamentals=FUND)[
+        ids["AAA"]
+    ]
     assert {r.period_end.year for r in late.rows} == {2022, 2023}
     assert late.last_close == (date(2024, 3, 28), D(80))
     result = valuation_multiples(late, None, cfg=CFG)
@@ -131,7 +137,7 @@ def test_peer_multiples_collect_each_peers_current_values_sorted_by_symbol(
     put(db, ids["EEE"], [strow("eps", "-1", date(2023, 12, 31), date(2024, 2, 15), currency="INR")])
     upsert_bars(db, [bar(ids["BBB"], "2024-03-28", "50"), bar(ids["DDD"], "2024-03-28", "60"),
                      bar(ids["EEE"], "2024-03-28", "70")])  # fmt: skip
-    peers = load_peer_multiples(db, sql, ids["AAA"], date(2024, 3, 31), CFG)
+    peers = load_peer_multiples(db, sql, ids["AAA"], date(2024, 3, 31), CFG, fundamentals=FUND)
     assert peers.symbols == ("BBB", "DDD", "EEE") and peers.considered == 3
     assert peers.values["pe"] == (D(10), D(15))  # EEE has a loss: no meaningful P/E
     assert all(peers.values[m] == () for m in MULTIPLES if m != "pe")
@@ -143,9 +149,11 @@ def test_peer_multiples_without_an_industry_say_why(
 ) -> None:
     sql, ids = master
     sql.execute("update security set industry = null where id = ?", (ids["AAA"],))
-    peers = load_peer_multiples(db, sql, ids["AAA"], date(2024, 3, 31), CFG)
+    peers = load_peer_multiples(db, sql, ids["AAA"], date(2024, 3, 31), CFG, fundamentals=FUND)
     assert peers.considered == 0 and peers.values["pe"] == () and "industry" in (peers.reason or "")
-    inputs = load_valuation_inputs(db, sql, [ids["AAA"]], date(2024, 3, 31), CFG)[ids["AAA"]]
+    inputs = load_valuation_inputs(
+        db, sql, [ids["AAA"]], date(2024, 3, 31), CFG, fundamentals=FUND
+    )[ids["AAA"]]
     assert current_multiples(inputs)["pe"].available is False
 
 
@@ -227,17 +235,19 @@ def test_flag_inputs_assemble_market_rows_pledge_and_filings(
     write_fundamentals(db, ids["AAA"], [], "bse_shareholding", shareholding=share_rows(
         [("50", "18"), ("50", "21"), ("50", "25")]))  # fmt: skip
     asof = date(2024, 6, 30)
-    us = load_flag_inputs(db, sql, ids["USCO"], asof, CFG, contingent_liabilities=D(5))
+    us = load_flag_inputs(
+        db, sql, ids["USCO"], asof, CFG, contingent_liabilities=D(5), fundamentals=FUND
+    )
     assert us is not None and us.market == "US" and us.auditor is not None
     assert us.contingent_liabilities == D(5) and len(us.rows) == 6
     flags = {f.flag: f for f in detect_flags(us, as_of=asof, cfg=CFG)}
     assert flags["auditor_change"].status == "fired" and flags["cfo_to_pat"].severity == "hard"
-    india = load_flag_inputs(db, sql, ids["AAA"], asof, CFG)
+    india = load_flag_inputs(db, sql, ids["AAA"], asof, CFG, fundamentals=FUND)
     assert india is not None and india.market == "IN" and india.auditor is None
     assert len(india.shareholding) == 3
     assert {f.flag: f for f in detect_flags(india, as_of=asof, cfg=CFG)}[
         "pledge"
     ].severity == "hard"
-    assert load_flag_inputs(db, sql, 99999, asof, CFG) is None
-    early = load_flag_inputs(db, sql, ids["AAA"], date(2023, 5, 1), CFG)
+    assert load_flag_inputs(db, sql, 99999, asof, CFG, fundamentals=FUND) is None
+    early = load_flag_inputs(db, sql, ids["AAA"], date(2023, 5, 1), CFG, fundamentals=FUND)
     assert early is not None and len(early.shareholding) == 1 and early.rows == ()
