@@ -14,6 +14,7 @@ from nivesh_cli.main import app
 from nivesh_core.pii_scan import scan_paths, scan_text
 from nivesh_core.redact import is_sensitive_key
 from tests.cli.test_engine_cli import ASOF, RULES, Env, seed_cli_store
+from tests.scan_fx import scan_output
 
 ROOT = Path(__file__).resolve().parents[2]
 runner = CliRunner()
@@ -62,7 +63,7 @@ def test_analysis_pipeline_leaves_no_pii_in_fixtures_or_cli_output(
     env: Env, tmp_path: Path
 ) -> None:
     for text in (*outputs(env, tmp_path), *outputs(env, tmp_path, "--json")):
-        assert scan_text(text) == []
+        assert scan_output(text, tmp_path) == []
     for path in OWN_FILES:
         if path.exists():
             assert scan_text(path.read_text()) == [], path.name

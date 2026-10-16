@@ -17,13 +17,14 @@ from nivesh_core.pii_scan import scan_paths, scan_text
 from tests.agents import committee_fx as fx
 from tests.ideas_fx import ASOF, hold, seed_ideas_store, with_benchmarks
 from tests.run_paths import run_path
+from tests.scan_fx import scan_output
 
 ROOT = Path(__file__).resolve().parents[2]
 runner = CliRunner()
 
 
 def test_ideas_run_over_synthetic_universe_leaves_no_pii_in_run_dir_trace_ledger_or_watch_rows(
-    cli_env: tuple[list[str], Path], monkeypatch: pytest.MonkeyPatch
+    cli_env: tuple[list[str], Path], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     args, data = cli_env
     seed_ideas_store(data)
@@ -56,8 +57,8 @@ def test_ideas_run_over_synthetic_universe_leaves_no_pii_in_run_dir_trace_ledger
     hashes = re.findall(r"[0-9a-f]{64}", dump)
     assert hashes  # the input hashes: a digest may hold a ten-digit run, which the scanner flags
     assert scan_text(re.sub(r"[0-9a-f]{64}", "<hash>", dump)) == []
-    assert scan_text(ran.output) == [] and scan_text(watch.output) == []
-    assert scan_text(call("watch").output) == []
+    assert scan_output(ran.output, tmp_path) == [] and scan_output(watch.output, tmp_path) == []
+    assert scan_output(call("watch").output, tmp_path) == []
 
 
 KEYLIKE = re.compile(r"[A-Za-z0-9]{20,}")

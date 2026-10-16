@@ -20,6 +20,7 @@ from nivesh_mcp.base import ReadOnlyServer
 from tests import pii_values as pv
 from tests import tapetide_fx as tx
 from tests.cli.test_market import funds, macro, net, newsnet, prices, tape  # noqa: F401 - fixtures
+from tests.scan_fx import clean_output
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -74,7 +75,10 @@ async def test_no_pii_in_tool_output_fixtures_or_errors(
 
 
 def test_cas_pipeline_leaves_no_pii_anywhere(
-    cli_env: tuple[list[str], Path], fake_keyring: object, monkeypatch: pytest.MonkeyPatch
+    cli_env: tuple[list[str], Path],
+    fake_keyring: object,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     import keyring
     from typer.testing import CliRunner
@@ -110,7 +114,8 @@ def test_cas_pipeline_leaves_no_pii_anywhere(
         for p in data.rglob("*")
         if p.is_file() and p.suffix in {".json", ".jsonl", ".txt"}
     )
-    for label, text in {"db": dump, "report": reports, "cli": r.output, "files": files}.items():
+    cli = clean_output(r.output, tmp_path)
+    for label, text in {"db": dump, "report": reports, "cli": cli, "files": files}.items():
         assert scan_text(text) == [], label
         for pii in pii_strings():
             assert pii not in text, label
@@ -122,6 +127,7 @@ async def test_market_pipeline_leaves_no_pii_anywhere(
     fake_keyring: object,
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
+    tmp_path: Path,
 ) -> None:
     """Fixtures -> master build and every ingest command -> DuckDB/SQLite dumps, CLI output and
     all 20 MCP tool payloads are scan-clean; the EDGAR contact and vendor keys appear nowhere."""
@@ -211,7 +217,8 @@ async def test_market_pipeline_leaves_no_pii_anywhere(
     payloads.append(str(await call("filings", "get_filing_text", filing_id=fid, section="mdna")))
 
     secrets_ = (pv.edgar_contact(), pv.fred_key(), pv.fmp_key(), tx.token())
-    texts = {"sqlite": sqlite_dump, "duckdb": "\n".join(parts), "cli": "\n".join(outputs),
+    texts = {"sqlite": sqlite_dump, "duckdb": "\n".join(parts),
+             "cli": clean_output("\n".join(outputs), tmp_path),
              "mcp": "\n".join(payloads)}  # fmt: skip
     for needle in ("sec_edgar", "tapetide", "nse_bhavcopy", "usdinr", "fmp", "example-news"):
         assert needle in texts["duckdb"], needle  # the pipeline really stored each data family
@@ -227,7 +234,10 @@ async def test_market_pipeline_leaves_no_pii_anywhere(
 
 
 async def test_us_holdings_pipeline_leaves_no_pii_anywhere(
-    cli_env: tuple[list[str], Path], fake_keyring: object, monkeypatch: pytest.MonkeyPatch
+    cli_env: tuple[list[str], Path],
+    fake_keyring: object,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """US CSV + Alpaca fixture -> stores -> CLI output -> MCP payloads are scan-clean, and the
     dummy broker credentials appear in none of them."""
@@ -293,7 +303,8 @@ async def test_us_holdings_pipeline_leaves_no_pii_anywhere(
         for p in data.rglob("*")
         if p.is_file() and p.suffix in {".json", ".jsonl", ".txt", ".log"}
     )
-    texts = {"cli": "\n".join(outputs), "db": dump, "files": files, "mcp": "\n".join(payloads)}
+    cli = clean_output("\n".join(outputs), tmp_path)
+    texts = {"cli": cli, "db": dump, "files": files, "mcp": "\n".join(payloads)}
     for label, text in texts.items():
         found = scan_text(text)
         assert found == [], (label, [text[f.start - 30 : f.end + 5] for f in found])
@@ -304,7 +315,7 @@ async def test_us_holdings_pipeline_leaves_no_pii_anywhere(
 
 
 def test_mf_pipeline_leaves_no_pii_anywhere(
-    cli_env: tuple[list[str], Path], monkeypatch: pytest.MonkeyPatch
+    cli_env: tuple[list[str], Path], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """MF fixtures -> nav/meta/holdings/returns/overlap/doctor/discover -> SQLite and DuckDB
     dumps (cache included) and all CLI output are scan-clean; the holdings credential, supplied
@@ -387,7 +398,8 @@ def test_mf_pipeline_leaves_no_pii_anywhere(
         for p in data.rglob("*")
         if p.is_file() and p.suffix in {".json", ".jsonl", ".txt", ".log"}
     )
-    texts = {"sqlite": sqlite_dump, "duckdb": duck_dump, "files": files, "cli": "\n".join(outputs)}
+    cli = clean_output("\n".join(outputs), tmp_path)
+    texts = {"sqlite": sqlite_dump, "duckdb": duck_dump, "files": files, "cli": cli}
     for label, text in texts.items():
         found = scan_text(text)
         assert found == [], (label, [text[f.start - 30 : f.end + 5] for f in found])

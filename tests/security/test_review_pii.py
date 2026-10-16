@@ -16,6 +16,7 @@ from tests import pii_values as pv
 from tests.agents import committee_fx as fx
 from tests.agents.fake_sdk import Call, reply
 from tests.cli.test_thesis_cli import Env, seed
+from tests.scan_fx import scan_output
 
 ROOT = Path(__file__).resolve().parents[2]
 runner = CliRunner()
@@ -28,7 +29,7 @@ def _sid(call: Call) -> int:
 
 
 def test_onboard_and_review_runs_over_synthetic_holdings_leave_no_pii_in_run_dir_trace_or_thesis_rows(  # noqa: E501
-    cli_env: Env, monkeypatch: pytest.MonkeyPatch
+    cli_env: Env, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     seed(cli_env[1])
     monkeypatch.setattr(cengine, "_today", lambda: fx.AS_OF)
@@ -64,7 +65,7 @@ def test_onboard_and_review_runs_over_synthetic_holdings_leave_no_pii_in_run_dir
     finally:
         sql.close()
     assert len(rows) == 3 and all(scan_text(" ".join(row)) == [] for row in rows)
-    assert scan_text(r.stdout) == []
+    assert scan_output(r.stdout, tmp_path) == []
 
 
 def test_new_fixtures_prompts_and_schemas_have_no_key_shaped_literals() -> None:
