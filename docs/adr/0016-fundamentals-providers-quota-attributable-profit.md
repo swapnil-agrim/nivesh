@@ -224,7 +224,10 @@ not investment advice.
   `fa` as `SecurityInputs.revenue_basis` and is stamped into the inputs of `net_margin_pct` and
   `revenue_cagr_*` for India (US untouched), and `compare` prints it. ITC's Tapetide revenue is
   78,868 crore against 89,913 in the filing (ADR-0015: net of excise): the figure is not corrected,
-  the basis is recorded. A per-symbol override is deferred (X5).
+  the basis is recorded. A per-symbol override is deferred (X5). **Disclosed limit:** the label comes
+  from the first enabled statements provider, not from the provider whose rows were read (stored
+  rows carry no source), so a security served only by the fallback is still labelled with the
+  primary's definition; carrying the source into the metrics is tracked in #146.
 - **D12 One contract suite for every provider, and a fake.** The suite in
   `tests/adapters/test_provider_contract.py` runs six parametrized checks over every harness in
   `tests/provider_fx.py` (Tapetide, BSE XBRL, the fake provider and the Upstox skeleton): point in
@@ -260,7 +263,8 @@ not investment advice.
 - With the defaults, behaviour is unchanged except for the ledger: a cold company costs 6 billed
   calls and 6 ledger rows, a cached re-run costs none, and a quota refusal sends nothing. Nothing
   can reach `api.upstox.com` unless the owner enables `upstox` and sets its token.
-- Schema is now 10 and forward-only. The ledger counts this machine's attempts only; calls made
+- Schema is now 10 and forward-only. The ledger counts the attempts recorded in this data directory only (`data_dir` is relative to
+  the working directory by default, so a second checkout or a scratch data dir starts at zero); calls made
   elsewhere on the same plan must be entered by hand (D7), and the owner should compare the ledger
   with the vendor dashboard, which also settles failed-call billing and the monthly anchor.
 - Two of the five recorded names change value by design (RELIANCE and HDFCBANK: net margin, ROE

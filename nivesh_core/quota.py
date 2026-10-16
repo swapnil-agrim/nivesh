@@ -79,10 +79,10 @@ def _month_window(today: date, start_day: int) -> tuple[date, date]:
 def effective_limits(conn: sqlite3.Connection, vendor: str, plan: PlanSettings) -> Limits:
     """The plan's caps, each replaced by the latest override (`set_limit`) that sets that field."""
     daily, monthly = conn.execute(
-        "SELECT (SELECT daily FROM vendor_limit WHERE vendor = ?1 AND daily IS NOT NULL "
-        "ORDER BY id DESC LIMIT 1), (SELECT monthly FROM vendor_limit WHERE vendor = ?1 "
+        "SELECT (SELECT daily FROM vendor_limit WHERE vendor = :v AND daily IS NOT NULL "
+        "ORDER BY id DESC LIMIT 1), (SELECT monthly FROM vendor_limit WHERE vendor = :v "
         "AND monthly IS NOT NULL ORDER BY id DESC LIMIT 1)",
-        (vendor,),
+        {"v": vendor},
     ).fetchone()
     return Limits(
         daily if daily is not None else plan.daily,

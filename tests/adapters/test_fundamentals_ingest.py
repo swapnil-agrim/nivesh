@@ -1093,6 +1093,12 @@ def test_a_watched_security_records_the_watchlist_priority(
     assert {r[2] for r in ledger_rows(env)} == {"watchlist"}
 
 
+def test_watching_one_security_does_not_promote_another(env: Env) -> None:
+    track_security(env.sql, env.sec("TCS").id, None, None, TODAY)
+    assert _priority_of(env.sql, env.sec("TCS")) == "watchlist"
+    assert _priority_of(env.sql, env.sec("RELIANCE")) == "universe"  # only the watched one counts
+
+
 def test_a_refused_reserve_stops_the_run_with_one_line_and_no_further_request(
     env: Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:

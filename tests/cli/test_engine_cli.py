@@ -370,4 +370,5 @@ def test_fa_cross_check_with_one_provider_says_nothing_to_compare(env: Env) -> N
 def test_fa_cross_check_refuses_json_and_note_and_points_at_compare(env: Env, flag: str) -> None:
     r = call(env, "fa", "RELI", "--cross-check", flag)
     assert r.exit_code == 2
-    assert "fundamentals compare --json" in re.sub(r"\s+", " ", re.sub(r"[│╭╮╰╯─]", "", r.output))
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", r.output)  # CI colours the usage error, a terminal may
+    assert "fundamentals compare --json" in re.sub(r"\s+", " ", re.sub(r"[│╭╮╰╯─]", "", plain))

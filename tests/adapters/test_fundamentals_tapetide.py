@@ -899,6 +899,27 @@ def test_monthly_wording_also_halts_and_fills_the_month_not_the_day(text: str) -
     assert st.month.used == 5000 and st.day.used == 1  # the month is full; today is not
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Error: daily limit reached: 400 requests per day (5000 per month plan)",
+        "Error: quota per day exceeded; your monthly cap is 5000",
+        "Error: rate limit, 400/day of the 5000 per month allowance used",
+    ],
+)
+def test_daily_wording_wins_over_a_mention_of_the_monthly_plan(text: str) -> None:
+    """A reply that names both windows fills the day only: burning the month for a daily limit
+    cannot be undone (the ledger is append-only)."""
+    srv, c = Tapetide(), ledger()
+    srv.fail_all = httpx.Response(200, json=envelope(text, is_error=True))
+    b = memory_budget(c, daily=400, monthly=5000, now=noon)
+    ad = adapter(srv, budget=b)
+    with pytest.raises(RateLimited, match="quota reached"):
+        ad.fetch(**QUARTERLY)
+    st = b.status()
+    assert st.day.used == 400 and st.month.used == 400  # today is full; the month only has today
+
+
 def test_a_benign_monthly_word_is_not_a_quota_halt() -> None:
     srv = Tapetide()
     srv.fail_all = httpx.Response(200, json=envelope("Error: monthly report unavailable",

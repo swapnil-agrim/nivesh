@@ -276,6 +276,23 @@ def test_manual_calls_count_toward_both_windows_and_status_shows_them() -> None:
     ]
 
 
+def test_the_ledger_queries_raise_no_sqlite_deprecation_warning() -> None:
+    """Python 3.14 turns sqlite3's mixing of named and positional placeholders into an error."""
+    import warnings
+
+    assert not re.search(r"\?\d", Path(quota.__file__).read_text())  # numbered placeholders
+    c = conn()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        set_limit(c, V, daily=50, monthly=500, now=at(NOON))
+        add_manual(c, V, 3, now=at(NOON))
+        b = budget(c, priority="holdings")
+        b.reserve("t")
+        b.status()
+        b.exhaust("month")
+        effective_limits(c, V, plan())
+
+
 def test_add_manual_rejects_a_non_positive_count() -> None:
     c = conn()
     for n in (0, -3):

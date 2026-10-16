@@ -68,6 +68,7 @@ SECTIONS = ("quarterly", "profit_loss", "balance_sheet", "cash_flow")
 _MONTHLY = r"monthly (?:limit|quota|cap)|per month"
 _QUOTA = re.compile(rf"rate.?limit|quota|too many requests|daily limit|per day|{_MONTHLY}", re.I)
 _MONTHLY_RE = re.compile(_MONTHLY, re.I)
+_DAILY_RE = re.compile(r"daily|per day|/day", re.I)  # daily wording wins when a reply has both
 _NOT_FOUND = re.compile(r"\b(?:company|symbol|section) not found", re.I)
 # narrower than _NOT_FOUND: "Section not found" for a valid company must not stop the others
 _SYMBOL_UNKNOWN = re.compile(r"\b(?:company|symbol) not found", re.I)
@@ -205,10 +206,13 @@ class TapetideFundamentals(Adapter):
         return self._budget
 
     def _quota_halt(self, budget: Budget, text: str = "") -> MarketDataError:
-        """The vendor says the quota is spent. Persist that (the month on monthly wording, else the
-        day; nothing is ever lowered) so a new process spends no doomed request, then halt."""
+        """The vendor says the quota is spent. Persist that (the month on monthly wording alone,
+        else the day; nothing is ever lowered) so a new process spends no doomed request, then halt.
+        A reply that names both windows fills the day only: the ledger is append-only, so burning
+        the month for a daily limit could not be taken back."""
+        monthly = _MONTHLY_RE.search(text) and not _DAILY_RE.search(text)
         try:
-            budget.exhaust("month" if _MONTHLY_RE.search(text) else "day")
+            budget.exhaust("month" if monthly else "day")
             plan = budget.describe()
         except sqlite3.Error:  # the halt must not depend on the ledger
             plan = "the configured plan"
