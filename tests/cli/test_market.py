@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -250,8 +251,9 @@ def test_market_prices_output_has_no_pii(cli_env: Env, prices: Feed, tmp_path: P
 
 
 @pytest.fixture
-def tape(monkeypatch: pytest.MonkeyPatch) -> tx.Tapetide:
-    """Tapetide served from the recorded fixtures, with a (test) token set."""
+def tape(monkeypatch: pytest.MonkeyPatch, fake_keyring: MemoryKeyring) -> tx.Tapetide:
+    """Tapetide served from the recorded fixtures, with a (test) token set; the OS keychain is
+    replaced by an in-memory one so no test can read the real one."""
     srv = tx.Tapetide()
     monkeypatch.setenv("TAPETIDE_TOKEN", tx.token())
     monkeypatch.setattr(cm, "_tapetide", lambda: tx.adapter(srv))
@@ -327,10 +329,102 @@ def test_market_fundamentals_india_prints_tapetide_counts_notes_and_quota(
     assert r.exit_code == 0, r.output
     assert "annual periods 12, quarterly periods 13" in r.output
     assert "estimated filing dates:" in r.output and "minority interest" in r.output
-    assert "Tapetide calls this run: 6 (free plan 50/day, resets 00:00 IST)" in r.output
+    assert (
+        "Tapetide calls this run: 6 (6 attempted; today 6/400, month 6/5,000, "
+        "daily resets 00:00 IST)" in r.output
+    )
     assert tape.calls == 6 and tx.token() not in r.output and scan_output(r.output, tmp_path) == []
     again = runner.invoke(app, [*cli_env[0], "market", "fundamentals", "RELIANCE"])
-    assert "Tapetide calls this run: 0" in again.output and tape.calls == 6  # cached
+    assert (
+        "Tapetide calls this run: 0 (0 attempted; today 6/400, month 6/5,000, "
+        "daily resets 00:00 IST)" in again.output
+    )
+    assert tape.calls == 6  # cached
+
+
+def ledger_calls(data: Path) -> int:
+    c = sqlite3.connect(data / "nivesh.sqlite")
+    try:
+        return int(c.execute("select count(*) from vendor_call where kind = 'call'").fetchone()[0])
+    finally:
+        c.close()
+
+
+def test_cli_path_writes_one_ledger_row_per_request(
+    cli_env: Env, funds: None, tape: tx.Tapetide
+) -> None:
+    r = runner.invoke(app, [*cli_env[0], "market", "fundamentals", "RELIANCE"])
+    assert r.exit_code == 0, r.output
+    assert ledger_calls(cli_env[1]) == tape.calls == 6
+    runner.invoke(app, [*cli_env[0], "market", "fundamentals", "RELIANCE"])
+    assert ledger_calls(cli_env[1]) == tape.calls == 6  # inside the cache: no request, no row
+
+
+def test_cli_refuses_beyond_the_configured_plan_and_says_so(
+    cli_env: Env, funds: None, tape: tx.Tapetide
+) -> None:
+    cfg = Path(cli_env[0][1]) / "nivesh.yaml"
+    cfg.write_text(cfg.read_text().replace("daily: 400", "daily: 2"))
+    r = runner.invoke(app, [*cli_env[0], "market", "fundamentals", "RELIANCE"])
+    assert r.exit_code == 0, r.output
+    assert tape.calls == 2 == ledger_calls(cli_env[1])
+    assert "failed source" in r.output and "daily quota reached: 2 of 2 used" in r.output
+    assert "Tapetide calls this run: 2 (2 attempted; today 2/2, month 2/5,000" in r.output
+
+
+def test_market_fundamentals_india_runs_an_enabled_upstox_through_its_seam(
+    cli_env: Env,
+    funds: None,
+    tape: tx.Tapetide,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from tests.provider_fx import UPSTOX_CRED, UpstoxVendor, upstox_adapter, upstox_cred
+
+    cfg = Path(cli_env[0][1]) / "nivesh.yaml"
+    text = cfg.read_text()
+    assert "name: upstox, enabled: false" in text  # the shipped default is disabled
+    cfg.write_text(text.replace("name: upstox, enabled: false", "name: upstox, enabled: true"))
+    monkeypatch.setenv(UPSTOX_CRED, upstox_cred())
+    vendor = UpstoxVendor()
+    monkeypatch.setattr(cm, "_upstox", lambda: upstox_adapter(vendor))
+    r = runner.invoke(app, [*cli_env[0], "market", "fundamentals", "RELIANCE"])
+    assert r.exit_code == 0, r.output
+    assert vendor.calls == 5 and tape.calls == 6 and "corporate-actions" not in vendor.endpoints
+    assert "Upstox gives none" in r.output and "Tapetide calls this run: 6" in r.output
+    assert upstox_cred() not in r.output and scan_output(r.output, tmp_path) == []
+
+
+def test_market_fundamentals_help_does_not_claim_a_plan() -> None:
+    r = runner.invoke(app, ["market", "fundamentals", "--help"])
+    assert r.exit_code == 0 and "free" not in r.output.lower() and "Tapetide" in r.output
+
+
+def test_market_fundamentals_india_prints_the_pledge_skipped_line(
+    cli_env: Env, funds: None, tape: tx.Tapetide
+) -> None:
+    payload = tx.inner(tape.misc["shareholding"])
+    payload["promoter_pledge"].update(pct_of_promoter_holding="abc", status="unknown")
+    tape.misc["shareholding"] = tx.envelope(payload)
+    r = runner.invoke(app, [*cli_env[0], "market", "fundamentals", "RELIANCE"])
+    assert r.exit_code == 0, r.output
+    assert "skipped periods: 1" in r.output
+    assert "  skipped: shareholding: promoter pledge percentage is not a number" in r.output
+
+
+def test_market_fundamentals_india_lists_at_most_five_skipped_lines(
+    cli_env: Env, funds: None, tape: tx.Tapetide, tmp_path: Path
+) -> None:
+    def drop(sec: dict[str, Any]) -> None:  # seven periods without a filing date
+        gone = {a["period"] for a in sec["availability"][:7]}
+        sec["availability"] = [a for a in sec["availability"] if a["period"] not in gone]
+
+    tape.edit("RELIANCE", "profit_loss", drop)
+    r = runner.invoke(app, [*cli_env[0], "market", "fundamentals", "RELIANCE"])
+    assert r.exit_code == 0, r.output
+    assert "skipped periods: 7" in r.output
+    assert r.output.count("  skipped: ") == 5 and "  and 2 more" in r.output
+    assert scan_output(r.output, tmp_path) == []
 
 
 def test_market_fundamentals_india_without_token_degrades_with_the_setup_hint(

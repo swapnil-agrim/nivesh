@@ -132,7 +132,9 @@ def _inputs(
     day: date, needs: set[str],
 ) -> Any:  # fmt: skip
     sec = resolve_security(sql, query)
-    found = load_screen_inputs(duck, sql, [sec.id], day, settings.analysis, needs=needs)
+    found = load_screen_inputs(
+        duck, sql, [sec.id], day, settings.analysis, needs=needs, fundamentals=settings.fundamentals
+    )
     return sec, found[sec.id]
 
 
@@ -162,8 +164,9 @@ def valuation_report(
     """Multiples with history, percentile and peer median, plus the reverse-DCF range."""
     cfg = settings.analysis
     sec = resolve_security(sql, query)
-    inputs = load_valuation_inputs(duck, sql, [sec.id], day, cfg)[sec.id]
-    peers = load_peer_multiples(duck, sql, sec.id, day, cfg)
+    funds = settings.fundamentals
+    inputs = load_valuation_inputs(duck, sql, [sec.id], day, cfg, fundamentals=funds)[sec.id]
+    peers = load_peer_multiples(duck, sql, sec.id, day, cfg, fundamentals=funds)
     result = {
         "multiples": valuation_multiples(inputs, peers, cfg=cfg),
         "range": valuation_range(inputs, cfg=cfg),
@@ -177,7 +180,9 @@ def flag_report(
 ) -> SecReport:  # fmt: skip
     """Red flags with status, severity and evidence; a flag that cannot be tested says so."""
     sec = resolve_security(sql, query)
-    inputs = load_flag_inputs(duck, sql, sec.id, day, settings.analysis)
+    inputs = load_flag_inputs(
+        duck, sql, sec.id, day, settings.analysis, fundamentals=settings.fundamentals
+    )
     if inputs is None:
         raise NiveshError(f"{query!r} is not in the security master")
     flags = detect_flags(inputs, as_of=day, cfg=settings.analysis)
@@ -270,7 +275,9 @@ def score_report(
     ids, basis = (list(named[0]), named[1]) if named else universe_ids(duck, sql, symbols)
     ids = sorted({*ids, *extra_ids})
     cfg = settings.analysis
-    universe = load_screen_inputs(duck, sql, ids, day, cfg, needs=_SCORE_NEEDS)
+    universe = load_screen_inputs(
+        duck, sql, ids, day, cfg, needs=_SCORE_NEEDS, fundamentals=settings.fundamentals
+    )
     raw, meta, flags = raw_inputs(universe, as_of=day, cfg=cfg)
     cards = score_universe(raw, meta, flags, horizon=horizon, cfg=cfg)  # type: ignore[arg-type]
     scored = [{"symbol": universe[i].symbol, "card": cards[i]} for i in ranking(cards)]
@@ -395,7 +402,9 @@ def risk_facts(
     hard = False
     if sec.asset_class == "mf":  # fund path: exclusions and the position limit only
         return RiskFacts(excluded, False, False, False, None, max_pos, max_sec, None, weight)
-    flag_in = load_flag_inputs(duck, sql, sec.id, day, settings.analysis)
+    flag_in = load_flag_inputs(
+        duck, sql, sec.id, day, settings.analysis, fundamentals=settings.fundamentals
+    )
     if flag_in is not None:
         hard = any_hard(detect_flags(flag_in, as_of=day, cfg=settings.analysis))
     inp = load_risk_inputs(

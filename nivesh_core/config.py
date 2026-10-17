@@ -11,6 +11,7 @@ from nivesh_core.agents_config import AgentsSettings
 from nivesh_core.analysis_config import AnalysisSettings
 from nivesh_core.delivery_config import DeliverySettings
 from nivesh_core.errors import ConfigError
+from nivesh_core.fundamentals_config import FundamentalsSettings
 from nivesh_core.nse_holidays import merged_nse_holidays
 from nivesh_core.report_config import ReportSettings
 from nivesh_core.review_config import ReviewSettings
@@ -19,7 +20,7 @@ from nivesh_core.secrets import REF_RE
 from nivesh_core.universe_config import IdeasSettings, UniverseSettings
 from nivesh_core.yamlio import read_mapping, validate
 
-_SECRETISH = re.compile(r"(_key|_token|_secret|password)$", re.IGNORECASE)
+_SECRETISH = re.compile(r"(_key|_token|_secret|password|credential)$", re.IGNORECASE)
 _TTL_RE = re.compile(r"^(\d+)([dh])$")
 
 
@@ -326,6 +327,7 @@ class Settings(BaseModel):
     delivery: DeliverySettings = DeliverySettings()
     scoring: ScoringSettings = ScoringSettings()
     evaluation: EvaluationSettings = EvaluationSettings()
+    fundamentals: FundamentalsSettings = FundamentalsSettings()
 
     @field_validator("registered_ip")
     @classmethod

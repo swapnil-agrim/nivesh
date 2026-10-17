@@ -22,8 +22,9 @@ from nivesh_core.db.sqlite import open_sqlite
 from nivesh_core.holdings_store import save_ingest
 from nivesh_core.market_models import PriceBar
 from nivesh_core.market_store import upsert_bars, write_fundamentals, write_macro
+from nivesh_core.pii_scan import scan_text
 from nivesh_core.security_master import SecurityMaster, build_master
-from tests.analysis_fx import annual_rows, day, lcg_bars, universe_book
+from tests.analysis_fx import annual_rows, day, lcg_bars, strow, universe_book
 from tests.holdings_fx import holding
 from tests.market_fx import mrow
 from tests.us_fx import lot, usd_holding
@@ -328,3 +329,75 @@ def test_help_lists_the_new_commands(cli_env: Env) -> None:
     plain = re.sub(r"\x1b\[[0-9;]*m", "", r.output)
     for name in ("ta", "fa", "valuation", "flags", "xray", "risk", "screen", "score"):
         assert re.search(rf"(^|\s|│){name}(\s|$)", plain, re.M), name
+
+
+# --- #131 fa --cross-check -----------------------------------------------------------------------
+def two_providers(data: Path) -> None:
+    sql = open_sqlite(data / "nivesh.sqlite")
+    sid = sql.execute("select id from security where symbol = 'RELI'").fetchone()[0]
+    sql.close()
+    duck = open_duck(data / "nivesh.duckdb")
+    try:
+        for source, income, filed in (("tapetide", 95754, date(2023, 6, 1)),
+                                      ("upstox", 78039, date(2023, 7, 1))):  # fmt: skip
+            rows = [strow(item, v, date(2023, 3, 31), filed, currency="INR")
+                    for item, v in (("revenue", 1055780), ("net_income", income))]  # fmt: skip
+            write_fundamentals(duck, sid, rows, source)
+    finally:
+        duck.close()
+
+
+def test_text_output_names_the_profit_basis_of_a_metric_that_has_one() -> None:
+    """The human view shows which profit a figure rests on, as the JSON and MCP views do."""
+    out: list[str] = []
+    attributable = {"value": "7.65", "available": True, "reason": None, "inputs": {
+        "profit_basis": "eps_x_shares", "profit_gap_pct": "18.55"}}  # fmt: skip
+    unknown = {"value": "9.07", "available": True, "reason": None, "inputs": {
+        "profit_basis": "consolidated_minority_unknown", "profit_gap_pct": None}}  # fmt: skip
+    plain = {"value": "5", "available": True, "reason": None, "inputs": {"cfo": "1"}}
+    missing = {"value": None, "available": False, "reason": "no filings",
+               "inputs": {"profit_basis": "consolidated"}}  # fmt: skip
+    for name, metric in (("a", attributable), ("b", unknown), ("c", plain), ("d", missing)):
+        cengine._render(name, metric, 1, out)
+    assert out == [
+        "  a: 7.65 [profit: eps_x_shares, gap 18.55%]",
+        "  b: 9.07 [profit: consolidated_minority_unknown]",
+        "  c: 5",
+        "  d: unavailable (no filings)",
+    ]
+
+
+def test_fa_text_output_labels_an_india_net_margin_with_its_profit_basis(env: Env) -> None:
+    two_providers(env[1])  # revenue and net income only: no EPS or shares, so the basis is flagged
+    r = call(env, "fa", "RELI")
+    line = next(x for x in r.output.splitlines() if x.strip().startswith("net_margin_pct:"))
+    assert line.endswith("[profit: consolidated_minority_unknown]"), line
+    us = call(env, "fa", "US1")  # US output is never labelled
+    assert "[profit:" not in us.output
+
+
+def test_fa_cross_check_appends_the_provider_comparison_after_the_normal_output(env: Env) -> None:
+    two_providers(env[1])
+    plain = call(env, "fa", "RELI")
+    r = call(env, "fa", "RELI", "--cross-check")
+    assert r.exit_code == 0, r.output
+    assert plain.output.startswith("fa RELI as of") and "metrics:" in plain.output
+    assert r.output.startswith(plain.output)  # the usual fa output is untouched, then the block
+    tail = r.output[len(plain.output) :]
+    assert "cross-check across providers:" in tail and "tapetide" in tail and "upstox" in tail
+    assert "A 2023-03-31 net_income: tapetide 95,754 vs upstox 78,039 (-18.5" in tail
+    assert scan_text(tail) == []
+
+
+def test_fa_cross_check_with_one_provider_says_nothing_to_compare(env: Env) -> None:
+    r = call(env, "fa", "US1", "--cross-check")
+    assert r.exit_code == 0 and "cross-check across providers:" in r.output
+    assert "other stored sources (not compared): edgar" in r.output
+
+
+@pytest.mark.parametrize("flag", ["--json", "--note"])
+def test_fa_cross_check_refuses_json_and_note_and_points_at_compare(env: Env, flag: str) -> None:
+    r = call(env, "fa", "RELI", "--cross-check", flag)
+    assert r.exit_code == 2
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", r.output)  # CI colours the usage error, a terminal may
+    assert "fundamentals compare --json" in re.sub(r"\s+", " ", re.sub(r"[│╭╮╰╯─]", "", plain))

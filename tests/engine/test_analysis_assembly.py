@@ -22,6 +22,7 @@ from nivesh_core.analysis_config import AnalysisSettings
 from nivesh_core.db import init_stores
 from nivesh_core.db.duck import open_duck
 from nivesh_core.db.sqlite import open_sqlite
+from nivesh_core.fundamentals_config import FundamentalsSettings
 from nivesh_core.holdings_store import save_ingest
 from nivesh_core.market_models import PriceBar
 from nivesh_core.market_store import (
@@ -46,6 +47,7 @@ from tests.mf_fx import NAV, G, make_env, meta, save_holdings, sid
 from tests.us_fx import lot, usd_holding
 
 D = Decimal
+FUND = FundamentalsSettings()
 ASOF = day(299)
 
 
@@ -129,11 +131,15 @@ def test_screen_inputs_load_only_the_inputs_the_rules_need(tmp_path: Path) -> No
         seed_universe_store(duck, ids)
         us1, ina = ids["US1"], ids["INA"]
         cfg = cfg_with_benchmark()
-        got = load_screen_inputs(duck, sql, [us1, 99999], ASOF, cfg, needs={"statements"})
+        got = load_screen_inputs(
+            duck, sql, [us1, 99999], ASOF, cfg, needs={"statements"}, fundamentals=FUND
+        )
         assert set(got) == {us1}  # an unknown id is left out, not an error
         only = got[us1]
         assert only.rows and only.bars == () and only.estimates == () and only.valuation is None
-        bars = load_screen_inputs(duck, sql, [us1, ina], ASOF, cfg, needs={"bars", "benchmark"})
+        bars = load_screen_inputs(
+            duck, sql, [us1, ina], ASOF, cfg, needs={"bars", "benchmark"}, fundamentals=FUND
+        )
         assert len(bars[us1].bars) == 300 and bars[us1].benchmark is None  # no US benchmark set
         assert bars[ina].benchmark is not None and len(bars[ina].benchmark) == 300
         assert bars[us1].rows == () and bars[us1].symbol == "US1" and bars[us1].market == "US"
@@ -144,18 +150,30 @@ def test_screen_inputs_valuation_flags_and_estimates_follow_the_needs(tmp_path: 
         seed_universe_store(duck, ids)
         us1, ina = ids["US1"], ids["INA"]
         cfg = cfg_with_benchmark()
-        cur = load_screen_inputs(duck, sql, [us1], ASOF, cfg, needs={"statements", "last_close"})
+        cur = load_screen_inputs(
+            duck, sql, [us1], ASOF, cfg, needs={"statements", "last_close"}, fundamentals=FUND
+        )
         v = cur[us1].valuation
         assert v is not None and v.month_ends == () and v.last_close == (day(299), D(399))
-        hist = load_screen_inputs(duck, sql, [us1], ASOF, cfg, needs={"statements", "closes"})
+        hist = load_screen_inputs(
+            duck, sql, [us1], ASOF, cfg, needs={"statements", "closes"}, fundamentals=FUND
+        )
         hv = hist[us1].valuation
         assert hv is not None and len(hv.month_ends) >= 9 and hv.last_close == v.last_close
-        est = load_screen_inputs(duck, sql, [us1], ASOF, cfg, needs={"estimates"})
+        est = load_screen_inputs(
+            duck, sql, [us1], ASOF, cfg, needs={"estimates"}, fundamentals=FUND
+        )
         assert [(e.as_of, e.value) for e in est[us1].estimates] == [
             (day(240), D(5)), (day(299), D("5.5")),
         ]  # fmt: skip
         flag = load_screen_inputs(
-            duck, sql, [us1, ina], ASOF, cfg, needs={"statements", "shareholding", "filings"}
+            duck,
+            sql,
+            [us1, ina],
+            ASOF,
+            cfg,
+            needs={"statements", "shareholding", "filings"},
+            fundamentals=FUND,
         )
         assert flag[us1].flags is not None and flag[us1].flags.auditor == ()  # US: nothing stored
         assert flag[ina].flags is not None and flag[ina].flags.auditor is None  # India: no source
@@ -176,7 +194,9 @@ def test_screen_inputs_feed_the_screener_end_to_end(tmp_path: Path) -> None:
         )
         rules = parse_rules(text)
         needs = inputs_needed(["net_margin_pct", "price_vs_sma200_pct", "revisions"])
-        found = load_screen_inputs(duck, sql, [ids["US1"], ids["US2"]], ASOF, cfg, needs=needs)
+        found = load_screen_inputs(
+            duck, sql, [ids["US1"], ids["US2"]], ASOF, cfg, needs=needs, fundamentals=FUND
+        )
         res = screen(found, rules, as_of=ASOF, cfg=cfg)
         assert [m.symbol for m in res.matches] == ["US1"]  # US2: margin 2 percent fails
         by_rule = {v.rule_id: v.value for v in res.matches[0].values}
@@ -193,7 +213,9 @@ def test_screen_inputs_use_a_constant_number_of_queries(tmp_path: Path) -> None:
                 write_fundamentals(duck, ids[f"US{i}"], annual_rows(BOOK_GOOD), "edgar")
             spy = Counting(duck)
             wanted = [ids[f"US{i}"] for i in range(1, n + 1)]
-            got = load_screen_inputs(spy, sql, wanted, ASOF, cfg_with_benchmark(), needs=needs)  # type: ignore[arg-type]
+            got = load_screen_inputs(
+                spy, sql, wanted, ASOF, cfg_with_benchmark(), needs=needs, fundamentals=FUND
+            )  # type: ignore[arg-type]
             assert len(got) == n
             counts.append(spy.n)
     assert counts[0] == counts[1]

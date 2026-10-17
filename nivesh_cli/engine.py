@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import duckdb
 import typer
@@ -97,11 +97,22 @@ def _label(item: object, index: int) -> str:
     return f"[{index}]"
 
 
+def _profit_label(metric: dict[str, Any]) -> str:
+    """` [profit: <basis>[, gap N%]]` for an India figure that rests on a named profit basis (the
+    JSON and MCP views carry the same in `inputs`); nothing for any other metric."""
+    inputs = metric.get("inputs")
+    basis = inputs.get("profit_basis") if isinstance(inputs, dict) else None
+    if not isinstance(basis, str):
+        return ""
+    gap = inputs.get("profit_gap_pct") if isinstance(inputs, dict) else None
+    return f" [profit: {basis}{'' if gap is None else f', gap {gap}%'}]"
+
+
 def _render(name: str, v: object, depth: int, out: list[str]) -> None:
     pad = "  " * depth
     if isinstance(v, dict) and _is_metric(v):
         shown = _scalar(v["value"]) if v["available"] else f"unavailable ({v['reason']})"
-        out.append(f"{pad}{name}: {shown}")
+        out.append(f"{pad}{name}: {shown}{_profit_label(v) if v['available'] else ''}")
     elif isinstance(v, dict):
         out.append(f"{pad}{name}:")
         for k, x in v.items():
@@ -165,18 +176,31 @@ def fa_cmd(
     as_json: AsJson = False,
     note: Note = False,
     analyst: Analyst = False,
+    cross_check: Annotated[
+        bool, typer.Option("--cross-check", help="Add what each provider stored, side by side.")
+    ] = False,
 ) -> None:
     """Growth, profitability, balance sheet and cash quality, using filings up to the date."""
     if analyst and not note:
         raise typer.BadParameter("--analyst needs --note", param_hint="--analyst")
+    if cross_check and (as_json or note):
+        why = "use `nivesh fundamentals compare --json` for the provider comparison"
+        raise typer.BadParameter(why, param_hint="--cross-check")
     if note:
         from nivesh_cli.note import run_note
 
         return run_note(ctx, "fa", security, as_of, as_json, analyst)
+    block: list[str] = []
     with user_errors(), reader(ctx) as r:
         day = _as_of(as_of)
         rep = svc.fa_report(r.duck, r.sql, r.settings, security, day)
+        if cross_check:  # stored rows only: the same read as `nivesh fundamentals compare`
+            from nivesh_cli.fundamentals import cross_check_lines
+
+            block = cross_check_lines(r.duck, r.settings, rep.security_id, rep.symbol, day)
     emit("fa", rep.symbol, day, rep.result, as_json)
+    if block:
+        typer.echo("\n".join(block))
 
 
 @engine_app.command("valuation")
@@ -285,7 +309,9 @@ def screen_cmd(
             raise NiveshError(f"unknown metric(s): {', '.join(unknown)}")
         ids, basis, warnings = _screen_ids(r, security or [], universe, day)
         needs = inputs_needed(x.metric for x in rule_set.rules)
-        stocks = load_screen_inputs(r.duck, r.sql, ids, day, r.cfg, needs=needs)
+        stocks = load_screen_inputs(
+            r.duck, r.sql, ids, day, r.cfg, needs=needs, fundamentals=r.settings.fundamentals
+        )
         try:
             found = screen(
                 stocks,

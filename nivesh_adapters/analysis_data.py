@@ -18,8 +18,10 @@ import duckdb
 
 from nivesh_adapters.mf_ingest import HeldFund, Portfolio, load_portfolio
 from nivesh_adapters.mf_report import scheme_isins
+from nivesh_adapters.providers import provider_sources, revenue_basis_of
 from nivesh_core.analysis_config import AnalysisSettings
 from nivesh_core.config import Settings
+from nivesh_core.fundamentals_config import FundamentalsSettings
 from nivesh_core.holdings import Lot, Txn
 from nivesh_core.holdings_store import latest_holdings, latest_lots, list_transactions
 from nivesh_core.market_models import ShareholdingRow
@@ -88,16 +90,28 @@ def load_bars(
 
 
 def load_statements(
-    duck: duckdb.DuckDBPyConnection, security_ids: Sequence[int], as_of: date | None = None
+    duck: duckdb.DuckDBPyConnection,
+    security_ids: Sequence[int],
+    as_of: date | None = None,
+    *,
+    fundamentals: FundamentalsSettings,
 ) -> dict[int, list[StatementRow]]:
-    """Every filed version of every statement row filed on or before `as_of`."""
-    return get_statement_rows_many(duck, security_ids, as_of)
+    """Every filed version of every statement row filed on or before `as_of`, from the best
+    provider that has each figure (the `fundamentals.providers` ranking). `fundamentals` is
+    required on every loader: a default would silently ignore the owner's ranking."""
+    return get_statement_rows_many(
+        duck, security_ids, as_of, sources=provider_sources(fundamentals)
+    )
 
 
 def load_shareholding(
-    duck: duckdb.DuckDBPyConnection, security_ids: Sequence[int], as_of: date | None = None
+    duck: duckdb.DuckDBPyConnection,
+    security_ids: Sequence[int],
+    as_of: date | None = None,
+    *,
+    fundamentals: FundamentalsSettings,
 ) -> dict[int, list[ShareholdingRow]]:
-    return get_shareholding_many(duck, security_ids, as_of)
+    return get_shareholding_many(duck, security_ids, as_of, sources=provider_sources(fundamentals))
 
 
 def load_estimates(
@@ -198,6 +212,7 @@ def load_valuation_inputs(
     as_of: date,
     cfg: AnalysisSettings,
     *,
+    fundamentals: FundamentalsSettings,
     history: bool = True,
 ) -> dict[int, ValuationInputs]:
     """Valuation inputs for the securities that exist: every statement row filed on or before
@@ -205,7 +220,7 @@ def load_valuation_inputs(
     month-end series (enough for a current multiple)."""
     meta = security_meta(sql, security_ids)
     ids = [i for i in security_ids if i in meta]
-    rows = load_statements(duck, ids, as_of)
+    rows = load_statements(duck, ids, as_of, fundamentals=fundamentals)
     years = max(cfg.valuation.history_years) if history else 0
     closes = load_closes(duck, ids, as_of, years=years)
     return {
@@ -227,12 +242,16 @@ def load_peer_multiples(
     security_id: int,
     as_of: date,
     cfg: AnalysisSettings,
+    *,
+    fundamentals: FundamentalsSettings,
 ) -> PeerMultiples:
     """The current multiples of the peers (industry or owner override), by multiple name,
     sorted by peer symbol. A peer without a meaningful value for a multiple is left out of it."""
     found = load_peers(sql, security_id, cfg)
     ids = [p.id for p in found.rows]
-    inputs = load_valuation_inputs(duck, sql, ids, as_of, cfg, history=False)
+    inputs = load_valuation_inputs(
+        duck, sql, ids, as_of, cfg, history=False, fundamentals=fundamentals
+    )
     values: dict[str, list[Decimal]] = {m: [] for m in MULTIPLES}
     for p in found.rows:
         for name, metric in current_multiples(inputs[p.id]).items():
@@ -270,6 +289,7 @@ def load_flag_inputs(
     as_of: date,
     cfg: AnalysisSettings,
     *,
+    fundamentals: FundamentalsSettings,
     contingent_liabilities: Decimal | None = None,
 ) -> FlagInputs | None:
     """Red-flag inputs for one security as of a date (None for an unknown security): statement
@@ -283,8 +303,12 @@ def load_flag_inputs(
         auditor = load_auditor_filings(duck, [security_id], as_of, cfg)[security_id]
     return FlagInputs(
         market=meta.market,
-        rows=tuple(load_statements(duck, [security_id], as_of)[security_id]),
-        shareholding=tuple(load_shareholding(duck, [security_id], as_of)[security_id]),
+        rows=tuple(
+            load_statements(duck, [security_id], as_of, fundamentals=fundamentals)[security_id]
+        ),
+        shareholding=tuple(
+            load_shareholding(duck, [security_id], as_of, fundamentals=fundamentals)[security_id]
+        ),
         auditor=auditor,
         contingent_liabilities=contingent_liabilities,
     )
@@ -355,6 +379,7 @@ def load_screen_inputs(
     cfg: AnalysisSettings,
     *,
     needs: Collection[str],
+    fundamentals: FundamentalsSettings,
 ) -> dict[int, SecurityInputs]:
     """Screener inputs for the securities that exist, reading only what `needs` names (see
     `metrics.inputs_needed`): `bars`, `benchmark`, `sector_bars`, `statements`, `shareholding`,
@@ -370,8 +395,14 @@ def load_screen_inputs(
         if want & {"benchmark", "sector_bars"}
         else ({}, {})
     )
-    rows = load_statements(duck, ids, as_of) if "statements" in want else {}
-    share = load_shareholding(duck, ids, as_of) if "shareholding" in want else {}
+    rows = (
+        load_statements(duck, ids, as_of, fundamentals=fundamentals) if "statements" in want else {}
+    )
+    share = (
+        load_shareholding(duck, ids, as_of, fundamentals=fundamentals)
+        if "shareholding" in want
+        else {}
+    )
     history = max(cfg.valuation.history_years) if "closes" in want else 0
     closes = load_closes(duck, ids, as_of, years=history) if want & {"closes", "last_close"} else {}
     since = as_of - timedelta(days=2 * cfg.screen.revision_lookback_days)
@@ -396,11 +427,16 @@ def load_screen_inputs(
             if "filings" in want
             else None
         )
-        peers = load_peer_multiples(duck, sql, sid, as_of, cfg) if "peers" in want else None
+        peers = (
+            load_peer_multiples(duck, sql, sid, as_of, cfg, fundamentals=fundamentals)
+            if "peers" in want
+            else None
+        )
         out[sid] = SecurityInputs(
             sid, m.symbol, m.market, m.sector, kind, bars.get(sid, ()),
             by_market.get(m.market), by_sector.get(m.sector or ""), mine, mine_share, valuation,
             peers, tuple(estimates.get(sid, ())), flags,
+            revenue_basis_of(fundamentals, m.market),
         )  # fmt: skip
     return out
 
@@ -446,10 +482,12 @@ def _find(master: SecurityMaster, row: Row) -> SecurityRow | None:
 
 def _market_cap(
     duck: duckdb.DuckDBPyConnection, sql: sqlite3.Connection, sec: SecurityRow, valuation: date,
-    cfg: AnalysisSettings,
+    cfg: AnalysisSettings, *, fundamentals: FundamentalsSettings,
 ) -> Decimal | None:  # fmt: skip
     """Shares outstanding times the latest stored close, in the security's own currency."""
-    inputs = load_valuation_inputs(duck, sql, [sec.id], valuation, cfg, history=False)
+    inputs = load_valuation_inputs(
+        duck, sql, [sec.id], valuation, cfg, history=False, fundamentals=fundamentals
+    )
     return valuation_multiples(inputs[sec.id], None, cfg=cfg).market_cap
 
 
@@ -530,7 +568,9 @@ def load_xray_inputs(
             elif mine:
                 flows[row.key] = HoldingFlows((), "none", held.fx.reason or "no USDINR rate")
         if sec is not None and sec.market == "US" and row.asset_class == "equity":
-            cap_of[row.key] = _market_cap(duck, sql, sec, valuation, cfg)
+            cap_of[row.key] = _market_cap(
+                duck, sql, sec, valuation, cfg, fundamentals=settings.fundamentals
+            )
     notes = (*held.notes, *portfolio.skipped)
     return XrayInputs(
         held.rows, sector_of, cap_of, category_of, market_of, flows,

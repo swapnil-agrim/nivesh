@@ -1,7 +1,7 @@
 import json
 import sqlite3
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -14,12 +14,15 @@ import pytest
 from nivesh_adapters.edgar import Edgar, RateLimiter
 from nivesh_adapters.fundamentals_in import IndiaFundamentals
 from nivesh_adapters.fundamentals_tapetide import TapetideFundamentals
-from nivesh_adapters.market_ingest import _minority_note, ingest_filings, ingest_fundamentals
+from nivesh_adapters.market_ingest import _priority_of, ingest_filings, ingest_fundamentals
+from nivesh_adapters.providers import provider_class
+from nivesh_core import holdings_store as hs
 from nivesh_core.config import MarketSettings, Settings
 from nivesh_core.db import init_stores
 from nivesh_core.db.duck import open_duck
 from nivesh_core.db.sqlite import open_sqlite
 from nivesh_core.errors import NiveshError
+from nivesh_core.fundamentals_config import FundamentalsSettings, PlanSettings, ProviderSpec
 from nivesh_core.market_store import (
     get_filing_sections,
     get_shareholding,
@@ -27,10 +30,12 @@ from nivesh_core.market_store import (
     list_filings,
 )
 from nivesh_core.security_master import SecurityMaster, SecurityRow, build_master
-from nivesh_engine.statements import StatementRow, latest_as_of
+from nivesh_core.watch import track_security
+from nivesh_engine.statements import latest_as_of
 from tests import pii_values as pv
 from tests import tapetide_fx as tx
 from tests.conftest import MemoryKeyring
+from tests.holdings_fx import holding
 from tests.market_fx import accession, india_six_years, mrow, submissions
 
 FX = Path(__file__).resolve().parents[1] / "fixtures" / "market"
@@ -373,8 +378,9 @@ def test_quota_exhaustion_reports_reason_and_keeps_cached_rows(
     assert again.stale and again.rows == 0
     assert len(get_statement_rows(env.duck, first.security_id)) == n
     fresh = run_in(env, "HDFCBANK", with_token(monkeypatch, srv))  # nothing cached for this one
-    quota = [f for f in fresh.failed if "50 calls/day" in f]
+    quota = [f for f in fresh.failed if "quota reached" in f]
     assert fresh.rows == 0 and len(quota) == 1  # one reason line, not one per section
+    assert srv.calls == 7  # the halt was persisted: this new run spent no doomed request
 
 
 def test_quota_denial_mid_run_stops_further_calls_and_keeps_what_was_fetched(
@@ -386,7 +392,7 @@ def test_quota_denial_mid_run_stops_further_calls_and_keeps_what_was_fetched(
     rep = run_in(env, "NOBSE", with_token(monkeypatch, srv))
     assert srv.calls == 3 and rep.tapetide_calls == 2  # no snapshot, no shareholding requested
     assert rep.rows > 0 and rep.annual_periods > 0 and rep.quarterly_periods == 13
-    assert len([f for f in rep.failed if "50 calls/day" in f]) == 1
+    assert len([f for f in rep.failed if "quota reached" in f]) == 1
     assert any("missing Tapetide sections" in n for n in rep.notes)
     assert not [r for r in get_statement_rows(env.duck, rep.security_id) if r.item == "shares_out"]
 
@@ -399,18 +405,22 @@ def test_second_ingest_makes_zero_network_calls(env: Env, monkeypatch: pytest.Mo
     assert srv.calls == 6 and again.tapetide_calls == 0 and again.rows == 0
 
 
-def test_report_notes_minority_interest_when_eps_times_shares_differs(
+def test_report_carries_the_declared_profit_basis_and_ingest_computes_no_gap(
     env: Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     srv = tx.Tapetide()
     factory = with_token(monkeypatch, srv)
-    has_note = {
-        c: any("minority interest" in n for n in run_in(env, c, factory).notes)
-        for c in ("RELIANCE", "HDFCBANK", "TCS", "INFY", "ITC")
-    }
-    # RELIANCE 18.5% and HDFCBANK 4.2% above the attributable figure; the others within 3%
-    assert has_note == {"RELIANCE": True, "HDFCBANK": True, "TCS": False, "INFY": False,
-                        "ITC": False}  # fmt: skip
+    declared = provider_class("tapetide").info.profit_basis
+    seen: set[str] = set()
+    for company in ("RELIANCE", "HDFCBANK", "TCS", "INFY", "ITC"):
+        notes = run_in(env, company, factory).notes
+        basis = [n for n in notes if n.startswith("profit basis:")]
+        assert basis == [f"profit basis: {declared}"], company
+        seen.update(basis)
+        # no per-company arithmetic at ingest: the gap is derived when `fa` reads the rows
+        assert not any("EPS x" in n or "%" in n and "net income" in n for n in notes), company
+    # RELIANCE (+18.55% against EPS x shares) and INFY (+0.30%) get the same note
+    assert len(seen) == 1 and "minority interest" in seen.pop()
 
 
 def test_report_counts_estimated_rows_and_clamped_dates(
@@ -927,36 +937,6 @@ def test_default_today_is_the_ist_date_so_an_early_ist_end_of_day_period_is_kept
     assert rep.clamped_rows > 0
 
 
-@pytest.mark.parametrize(
-    ("ni", "expect"),
-    [
-        ("12000", "Net Profit, 20.0%"),
-        ("8000", "Net Profit, -20.0%"),
-        ("9800", None),
-        ("10300", None),
-    ],
-)
-def test_minority_note_discloses_a_gap_in_either_direction_and_ignores_small_ones(
-    ni: str, expect: str | None
-) -> None:
-    def row(item: str, value: str) -> StatementRow:
-        return StatementRow(
-            period_end=date(2026, 3, 31),
-            period_type="A",
-            item=item,
-            value=Decimal(value),
-            currency="INR",
-            filed_at=date(2026, 4, 27),
-        )
-
-    # shares 1000 x EPS 10 = 10000 attributable; 9800 is -2% and 10300 exactly +3%: both ignored
-    note = _minority_note([row("shares_out", "1000"), row("eps", "10"), row("net_income", ni)])
-    if expect is None:
-        assert note is None
-    else:
-        assert isinstance(note, str) and "minority interest" in note and expect in note
-
-
 def test_snapshot_and_shareholding_are_not_requested_when_no_statement_section_arrived(
     env: Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -969,3 +949,241 @@ def test_snapshot_and_shareholding_are_not_requested_when_no_statement_section_a
     assert {b["params"]["name"] for b in srv.bodies} == {"get_financials"}
     assert {b["params"]["arguments"].get("section") for b in srv.bodies} == set(tx.SECTIONS)
     assert rep.tapetide_calls == 0 and rep.rows == 0 and rep.shareholding == 0
+
+
+# --- #131 hardening ---
+
+
+def _unparsable_pledge(status: str) -> Any:
+    return _holding(
+        lambda p: p["promoter_pledge"].update(pct_of_promoter_holding="abc", status=status)
+    )
+
+
+def test_an_unparsable_pledge_percentage_is_a_skipped_line_not_a_failure(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    srv = tx.Tapetide()
+    _unparsable_pledge("unknown")(srv)
+    rep = run_in(env, "RELIANCE", with_token(monkeypatch, srv))
+    assert rep.failed == [] and rep.shareholding == 8
+    assert len([s for s in rep.skipped if "promoter pledge" in s]) == 1
+    assert get_shareholding(env.duck, rep.security_id)[-1].promoter_pledged_pct is None
+
+
+def test_a_pledge_status_none_stays_zero_without_a_skipped_line(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    srv = tx.Tapetide()
+    _unparsable_pledge("none")(srv)
+    rep = run_in(env, "RELIANCE", with_token(monkeypatch, srv))
+    assert rep.failed == [] and not [s for s in rep.skipped if "promoter pledge" in s]
+    assert get_shareholding(env.duck, rep.security_id)[-1].promoter_pledged_pct == Decimal(0)
+
+
+def test_an_unknown_symbol_costs_one_call_and_one_failed_line(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    srv = tx.Tapetide()
+    srv.aliases["NOBSE"] = "NOSUCHCO"  # the recorded "Company not found" reply
+    rep = run_in(env, "NOBSE", with_token(monkeypatch, srv))
+    assert srv.calls == 1 and rep.tapetide_calls == 0 and rep.rows == 0  # was four calls
+    assert len([f for f in rep.failed if "has no financial statements" in f]) == 1
+    assert {b["params"]["arguments"].get("section") for b in srv.bodies} == {"quarterly"}
+
+
+def test_a_section_not_found_reply_does_not_stop_the_other_sections(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    srv = tx.Tapetide()
+    text = "Error: Section not found: quarterly"
+    srv.fail_sections["quarterly"] = httpx.Response(200, json=tx.envelope(text, is_error=True))
+    rep = run_in(env, "RELIANCE", with_token(monkeypatch, srv))
+    assert srv.calls == 6 and rep.tapetide_calls == 5  # the failed call is not billed
+    assert rep.annual_periods >= 5 and rep.shareholding > 0
+
+
+# --- #131 quota ---
+
+
+def metered(env: Env, daily: int | None = 400, monthly: int | None = 5000, **plan: Any) -> None:
+    """Settings whose Tapetide plan is the given one (the ledger enforces exactly this)."""
+    spec = ProviderSpec(
+        name="tapetide", plan=PlanSettings(daily=daily, monthly=monthly, **plan),
+        credential="ref:TAPETIDE_TOKEN",
+    )  # fmt: skip
+    env.settings = Settings(
+        data_dir=env.settings.data_dir, market=MarketSettings(),
+        fundamentals=FundamentalsSettings(providers=[spec]),
+    )  # fmt: skip
+
+
+def ledger_rows(env: Env) -> list[tuple[Any, ...]]:
+    return env.sql.execute(
+        "SELECT tool, symbol, priority, outcome FROM vendor_call WHERE kind = 'call' ORDER BY id"
+    ).fetchall()
+
+
+def test_a_cold_run_writes_one_ledger_row_per_request(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    srv = tx.Tapetide()
+    rep = run_in(env, "RELIANCE", with_token(monkeypatch, srv))
+    rows = ledger_rows(env)
+    assert len(rows) == srv.calls == rep.tapetide_calls == rep.tapetide_attempts == 6
+    assert sorted(r[0] for r in rows) == ["get_financials"] * 5 + ["get_shareholding"]
+    assert {r[1:] for r in rows} == {("RELIANCE", "universe", "ok")}
+    assert rep.quota == "today 6/400, month 6/5,000, daily resets 00:00 IST"
+    assert rep.failed == [] and not [n for n in rep.notes if "quota" in n]
+
+
+def test_a_cached_rerun_adds_no_ledger_rows(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    srv = tx.Tapetide()
+    factory = with_token(monkeypatch, srv)
+    run_in(env, "RELIANCE", factory)
+    again = run_in(env, "RELIANCE", factory)
+    assert len(ledger_rows(env)) == srv.calls == 6 and again.tapetide_attempts == 0
+    assert again.quota == "today 6/400, month 6/5,000, daily resets 00:00 IST"
+
+
+def test_a_held_security_records_the_holdings_priority(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hs.save_ingest(
+        env.sql, kind="investright", source_label="sync", digest=None, as_of=TODAY,
+        holdings=[holding(isin="INE002A01018", symbol="RELIANCE")], txns=[], holder_refs=[],
+        warnings=[],
+    )  # fmt: skip
+    run_in(env, "RELIANCE", with_token(monkeypatch, tx.Tapetide()))
+    assert {r[2] for r in ledger_rows(env)} == {"holdings"}
+
+
+def test_a_held_security_without_an_isin_matches_on_symbol_and_exchange(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hs.save_ingest(  # creates a security row with no ISIN, as a holding of an unlisted-ISIN name
+        env.sql, kind="investright", source_label="sync", digest=None, as_of=TODAY,
+        holdings=[holding(isin=None, symbol="NOISIN", exchange="NSE")], txns=[], holder_refs=[],
+        warnings=[],
+    )  # fmt: skip
+    srv = tx.Tapetide()
+    srv.aliases["NOISIN"] = "RELIANCE"
+    assert env.sec("NOISIN").isin is None
+    rep = run_in(env, "NOISIN", with_token(monkeypatch, srv))
+    assert rep.failed == [] and {r[2] for r in ledger_rows(env)} == {"holdings"}
+
+
+def test_priority_matches_an_isin_across_listings_and_falls_back_to_universe(env: Env) -> None:
+    hs.save_ingest(
+        env.sql, kind="investright", source_label="sync", digest=None, as_of=TODAY,
+        holdings=[holding(isin="INE002A01018", symbol="RELIANCE"),
+                  holding(isin=None, symbol="NOISIN")], txns=[], holder_refs=[], warnings=[],
+    )  # fmt: skip
+    other_listing = replace(env.sec("RELIANCE"), id=999, symbol="500325", exchange="BSE")
+    assert _priority_of(env.sql, other_listing) == "holdings"  # the same ISIN, another listing
+    assert _priority_of(env.sql, replace(other_listing, isin=None)) == "universe"
+    assert _priority_of(env.sql, env.sec("TCS")) == "universe"
+
+
+def test_a_watched_security_records_the_watchlist_priority(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    track_security(env.sql, env.sec("TCS").id, None, None, TODAY)
+    run_in(env, "TCS", with_token(monkeypatch, tx.Tapetide()))
+    assert {r[2] for r in ledger_rows(env)} == {"watchlist"}
+
+
+def test_watching_one_security_does_not_promote_another(env: Env) -> None:
+    track_security(env.sql, env.sec("TCS").id, None, None, TODAY)
+    assert _priority_of(env.sql, env.sec("TCS")) == "watchlist"
+    assert _priority_of(env.sql, env.sec("RELIANCE")) == "universe"  # only the watched one counts
+
+
+def test_a_refused_reserve_stops_the_run_with_one_line_and_no_further_request(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    metered(env, daily=2, monthly=None)
+    srv = tx.Tapetide()
+    rep = run_in(env, "RELIANCE", with_token(monkeypatch, srv))
+    assert srv.calls == 2 and rep.tapetide_calls == 2 and rep.tapetide_attempts == 2
+    assert len(rep.failed) == 1 and "daily quota reached: 2 of 2 used" in rep.failed[0]
+    assert any("missing Tapetide sections: balance_sheet, cash_flow" in n for n in rep.notes)
+    assert {b["params"]["arguments"].get("section") for b in srv.bodies} == {
+        "quarterly",
+        "profit_loss",
+    }  # no snapshot, no shareholding request
+    assert rep.shareholding == 0 and rep.rows > 0
+    assert rep.quota == "today 2/2, month 2, daily resets 00:00 IST"  # no monthly cap: no limit
+
+
+def test_the_floor_of_the_universe_class_holds_calls_back_and_the_80_percent_warning_shows(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    metered(env, daily=5, monthly=None)  # universe may use 4 of 5: one is kept for holdings
+    srv = tx.Tapetide()
+    rep = run_in(env, "RELIANCE", with_token(monkeypatch, srv))
+    assert srv.calls == 4 and "(1 kept for higher-priority calls)" in " ".join(rep.failed)
+    assert "tapetide daily quota at 4 of 5 (80%)" in rep.notes
+
+
+def test_refresh_goes_through_the_same_gate(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    srv = tx.Tapetide()
+    factory = with_token(monkeypatch, srv)
+    run_in(env, "RELIANCE", factory)
+    again = run_in(env, "RELIANCE", factory, refresh=True)
+    assert srv.calls == 12 == len(ledger_rows(env)) == again.tapetide_attempts + 6
+    metered(env, daily=8, monthly=None)  # universe floor 6 of 8, and 12 are already spent today
+    last = run_in(env, "RELIANCE", factory, refresh=True)
+    assert srv.calls == 12 and last.tapetide_calls == 0 and last.stale and last.rows == 0
+    assert last.tapetide_attempts == 0 and len(ledger_rows(env)) == 12  # the cached copy is kept
+
+
+@pytest.mark.parametrize(
+    ("providers", "reason"),
+    [
+        ([], "no India fundamentals provider is enabled"),  # no spec: Tapetide is not configured
+        ([ProviderSpec(name="tapetide")], "quota budget not configured"),
+    ],
+    ids=["absent", "no-plan"],
+)
+def test_a_tapetide_spec_without_a_plan_sends_nothing(
+    env: Env, monkeypatch: pytest.MonkeyPatch, providers: list[ProviderSpec], reason: str
+) -> None:
+    env.settings = Settings(
+        data_dir=env.settings.data_dir, market=MarketSettings(),
+        fundamentals=FundamentalsSettings(providers=providers),
+    )  # fmt: skip
+    srv = tx.Tapetide()
+    rep = run_in(env, "NOBSE", with_token(monkeypatch, srv))
+    assert srv.calls == 0 and ledger_rows(env) == []
+    assert any(reason in f for f in rep.failed)
+    assert rep.quota is None and rep.tapetide_attempts is None and rep.rows == 0
+
+
+def test_ingest_replaces_a_preattached_budget_with_the_configured_one(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    metered(env, daily=3, monthly=None)
+    srv = tx.Tapetide()
+    monkeypatch.setenv("TAPETIDE_TOKEN", tx.token())
+    generous = tx.adapter(srv)  # a 10000-a-day budget on a throwaway ledger
+    rep = run_in(env, "RELIANCE", lambda: generous)
+    assert srv.calls == 3 and len(ledger_rows(env)) == 3  # the configured plan and ledger won
+    assert rep.failed and "daily quota reached" in rep.failed[0]
+
+
+def test_us_ingest_never_touches_the_ledger(env: Env) -> None:
+    rep = ingest_fundamentals(env.duck, env.sql, env.settings, env.sec("AAPL"), edgar=edgar(Edge()))
+    assert rep.quota is None and rep.tapetide_attempts is None and ledger_rows(env) == []
+
+
+def test_a_ledger_that_fails_after_the_run_only_hides_the_quota_line(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def locked(self: Any) -> Any:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr("nivesh_core.quota.Budget.status", locked)
+    rep = run_in(env, "RELIANCE", with_token(monkeypatch, tx.Tapetide()))
+    assert rep.rows > 0 and rep.failed == [] and rep.quota is None
+    assert rep.tapetide_attempts == 6 and not [n for n in rep.notes if "quota" in n]

@@ -19,6 +19,7 @@ from nivesh_adapters.edgar import Edgar
 from nivesh_adapters.estimates import Estimates
 from nivesh_adapters.fundamentals_in import IndiaFundamentals
 from nivesh_adapters.fundamentals_tapetide import TapetideFundamentals
+from nivesh_adapters.fundamentals_upstox import UpstoxFundamentals
 from nivesh_adapters.macro import MacroFetch
 from nivesh_adapters.market_ingest import (
     ingest_estimates,
@@ -51,6 +52,7 @@ from nivesh_core.security_master import (
 
 master_app = typer.Typer(no_args_is_help=True, help="Security master.")
 market_app = typer.Typer(no_args_is_help=True, help="Market data ingest (read-only sources).")
+MAX_SKIPPED_LINES = 5  # skipped reasons printed under the count; the rest are counted
 
 LOCAL_FILES = {
     "nse": "nse_equity_l.csv",
@@ -221,20 +223,27 @@ def _tapetide() -> TapetideFundamentals:  # seam: tests inject a MockTransport c
     return TapetideFundamentals()
 
 
+def _upstox() -> UpstoxFundamentals:  # seam: tests inject a MockTransport client
+    return UpstoxFundamentals()
+
+
 @market_app.command("fundamentals")
 def market_fundamentals(
     ctx: typer.Context,
     security: Annotated[str, typer.Argument(help="ISIN, symbol or company name.")],
     refresh: Annotated[bool, typer.Option(help="Bypass the fundamentals cache.")] = False,
 ) -> None:
-    """Fetch statements (US: SEC EDGAR; India: Tapetide free tier, BSE XBRL fallback) and, for
-    US, filing text sections. India needs a free TAPETIDE_TOKEN (`nivesh secrets set`)."""
+    """Fetch statements (US: SEC EDGAR; India: the providers enabled under `fundamentals.providers`
+    in the config, by default Tapetide with BSE XBRL as the fallback) and, for US, filing text
+    sections. Tapetide needs TAPETIDE_TOKEN (`nivesh secrets set`); its plan limits are in the same
+    config block (see `nivesh quota status`)."""
     with user_errors(), stores(ctx) as st:
         sec = resolve_security(st.sql, security)
         shared = functools.cache(lambda: _edgar(st.settings))  # one rate limiter for the run
         rep = ingest_fundamentals(
             st.duck, st.sql, st.settings, sec, refresh=refresh,
             edgar=shared, india=_india_fundamentals, tapetide=_tapetide,
+            adapters={"upstox": _upstox},
         )  # fmt: skip
         fil = (
             ingest_filings(
@@ -259,11 +268,14 @@ def market_fundamentals(
     for note in rep.notes:
         typer.echo(f"note: {note}")
     if rep.tapetide_calls is not None:
-        typer.echo(
-            f"Tapetide calls this run: {rep.tapetide_calls} (free plan 50/day, resets 00:00 IST)"
-        )
+        detail = "" if rep.quota is None else f" ({rep.tapetide_attempts} attempted; {rep.quota})"
+        typer.echo(f"Tapetide calls this run: {rep.tapetide_calls}{detail}")
     if rep.skipped:
         typer.echo(f"skipped periods: {len(rep.skipped)}")
+        for line in rep.skipped[:MAX_SKIPPED_LINES]:
+            typer.echo(f"  skipped: {line}")
+        if len(rep.skipped) > MAX_SKIPPED_LINES:
+            typer.echo(f"  and {len(rep.skipped) - MAX_SKIPPED_LINES} more")
     if fil is not None:
         typer.echo(f"filings: {fil.listed} listed, {fil.with_sections} with text sections")
     if rep.stale or (fil and fil.stale):

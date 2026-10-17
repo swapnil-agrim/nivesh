@@ -66,6 +66,7 @@ class SecurityInputs:
     peers: PeerMultiples | None = None
     estimates: Sequence[EstimateRow] = ()  # snapshots of the analyst estimates, any dates
     flags: FlagInputs | None = None
+    revenue_basis: str | None = None  # India: how the statements provider defines revenue
 
 
 @dataclass(frozen=True)
@@ -179,6 +180,7 @@ class Bundles:
             self._memo["fa"] = fa_compute(
                 self.inp.rows, self.inp.shareholding, as_of=self.as_of,
                 sector_kind=self.inp.sector_kind, cfg=self.cfg, market=self.inp.market,
+                revenue_basis=self.inp.revenue_basis,
             )  # fmt: skip
         return self._memo["fa"]  # type: ignore[return-value]
 

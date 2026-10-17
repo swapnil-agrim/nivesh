@@ -216,7 +216,15 @@ def review_facts(
     if sid is None or sec is None:
         raise NiveshError(f"{holding.symbol} is not in the security master")
     cfg = settings.analysis
-    inp = load_screen_inputs(duck, sql, [sid], as_of, cfg, needs=inputs_needed(REGISTRY))[sid]
+    inp = load_screen_inputs(
+        duck,
+        sql,
+        [sid],
+        as_of,
+        cfg,
+        needs=inputs_needed(REGISTRY),
+        fundamentals=settings.fundamentals,
+    )[sid]
     b = Bundles(inp, as_of, cfg)
     if xray is None:
         xray = xray_report(duck, sql, settings, profile, as_of)["xray"]

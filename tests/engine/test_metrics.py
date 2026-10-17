@@ -121,3 +121,23 @@ def test_setup_metrics_are_unavailable_with_too_few_bars() -> None:
     for name in ("setup_type", "base_breakout", "pullback_to_50dma"):
         cell = read(name, short)
         assert cell.value is None and cell.reason
+
+
+def test_india_fundamentals_carry_the_revenue_basis_and_the_profit_basis_into_the_cells() -> None:
+    book = {**BOOK, "net_income": [125], "eps": [1], "shares_out": [100]}
+    rows = tuple(annual_rows(book, currency="INR"))
+    inp = SecurityInputs(1, "IN1", market="IN", rows=rows, revenue_basis="vendor net sales")
+    cell = read("net_margin_pct", inp)
+    assert cell.value == D(10)  # EPS 1 x 100 shares = 100 over revenue 1000, not 125
+    assert cell.inputs["revenue_basis"] == "vendor net sales"
+    assert cell.inputs["profit_basis"] == "eps_x_shares"
+    assert cell.inputs["net_income_consolidated"] == D(125)
+    bare = SecurityInputs(1, "I2", market="IN", rows=rows)  # no basis declared: none shown
+    assert "revenue_basis" not in read("net_margin_pct", bare).inputs
+
+
+def test_us_fundamentals_ignore_the_revenue_basis_and_are_never_relabelled() -> None:
+    rows = tuple(annual_rows({**BOOK, "net_income": [125], "shares_out": [100]}))
+    cell = read("net_margin_pct", SecurityInputs(1, "US1", rows=rows, revenue_basis="ignored"))
+    assert cell.value == D("12.5")
+    assert not {"revenue_basis", "profit_basis"} & set(cell.inputs)

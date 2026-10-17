@@ -1,0 +1,48 @@
+{
+  "_comment": "UNVERIFIED: hand-written from the public API documentation, not from a live response. Synthetic figures in crore for tests only; field names beyond the documented ones are guesses. 'yearly' and 'quarterly' are the replies to time_period=yearly and quarterly.",
+  "yearly": {
+    "status": "success",
+    "data": {
+      "units_in": "crore",
+      "type": "consolidated",
+      "time_period": "yearly",
+      "history": [
+        {
+          "period": "Mar 2025",
+          "revenue": 1200.5,
+          "net_profit": 150.25
+        },
+        {
+          "period": "Mar 2026",
+          "revenue": 1350.75,
+          "net_profit": 172.5
+        }
+      ]
+    }
+  },
+  "quarterly": {
+    "status": "success",
+    "data": {
+      "units_in": "crore",
+      "type": "consolidated",
+      "time_period": "quarterly",
+      "history": [
+        {
+          "period": "Dec 2025",
+          "revenue": 340.25,
+          "net_profit": 41.5
+        },
+        {
+          "period": "Jun 2026",
+          "revenue": 355.5,
+          "net_profit": 44.75
+        },
+        {
+          "period": "TTM",
+          "revenue": 1390.0,
+          "net_profit": 176.0
+        }
+      ]
+    }
+  }
+}

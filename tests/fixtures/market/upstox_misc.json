@@ -1,0 +1,39 @@
+{
+  "_comment": "UNVERIFIED: hand-written from the public API documentation, not from a live response. Synthetic figures in crore for tests only; field names beyond the documented ones are guesses. Error envelopes: the codes are documented, the envelope layout is a guess.",
+  "err_invalid_isin": {
+    "status": "error",
+    "errors": [
+      {
+        "errorCode": "UDAPI1206",
+        "message": "Invalid ISIN"
+      }
+    ]
+  },
+  "err_invalid_type": {
+    "status": "error",
+    "errors": [
+      {
+        "errorCode": "UDAPI1207",
+        "message": "Invalid type"
+      }
+    ]
+  },
+  "err_invalid_time_period": {
+    "status": "error",
+    "errors": [
+      {
+        "errorCode": "UDAPI1208",
+        "message": "Invalid time period"
+      }
+    ]
+  },
+  "err_bad_token_401": {
+    "status": "error",
+    "errors": [
+      {
+        "errorCode": "UDAPI100050",
+        "message": "Invalid token used to access API"
+      }
+    ]
+  }
+}

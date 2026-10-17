@@ -21,10 +21,11 @@ from nivesh_adapters.mf_ingest import (
     load_portfolio,
     scheme_universe,
 )
+from nivesh_adapters.providers import provider_sources
 from nivesh_core.config import Settings
 from nivesh_core.errors import NiveshError
 from nivesh_core.holdings_store import list_transactions
-from nivesh_core.market_store import get_bars, get_statement_rows
+from nivesh_core.market_store import get_bars, get_statement_rows_many
 from nivesh_core.mf_models import FundHoldingRow
 from nivesh_core.mf_store import get_fund_holdings, get_nav, latest_fund_meta, months_stored
 from nivesh_core.security_master import SecurityMaster
@@ -41,7 +42,6 @@ from nivesh_engine.mf_valuation import (
     stock_multiples,
     weighted_multiple,
 )
-from nivesh_engine.statements import StatementRow
 
 MAX_PRICE_AGE_DAYS = 10  # a stock price further than this from the month end is not used
 HISTORY_MONTHS = 36
@@ -268,12 +268,21 @@ def fund_valuation(
         return ValuationReport(reason="no stored holdings; run `nivesh mf holdings`")
     cfg = settings.mf
     bars: dict[int, list[tuple[date, Decimal]]] = {}
-    statements: dict[int, list[StatementRow]] = {}
+    sources = provider_sources(settings.fundamentals)
     pe_by_month: dict[date, Decimal | None] = {}
     pb_by_month: dict[date, Decimal | None] = {}
     results: list[tuple[MultipleResult, MultipleResult, int, int]] = []
     for month in months[-(HISTORY_MONTHS + 1) :]:
         rows = get_fund_holdings(duck, security_id, month)
+        ids = sorted(
+            {
+                r.holding_security_id
+                for r in rows
+                if r.kind == "equity" and r.holding_security_id is not None
+            }
+        )
+        # what was filed by this month end, ranked by provider AFTER that cut (no look-ahead)
+        statements = get_statement_rows_many(duck, ids, month, sources=sources)
         pes: dict[str, Decimal | None] = {}
         pbs: dict[str, Decimal | None] = {}
         for r in rows:
@@ -282,7 +291,6 @@ def fund_valuation(
                 continue
             if sid not in bars:
                 bars[sid] = [(b.date, b.close) for b in get_bars(duck, sid)]
-                statements[sid] = get_statement_rows(duck, sid)
             pes[r.isin], pbs[r.isin] = stock_multiples(
                 statements[sid], _price_on(bars[sid], month), month
             )

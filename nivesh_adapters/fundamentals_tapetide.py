@@ -1,33 +1,55 @@
-"""India fundamentals from Tapetide's free tier (ADR-0015): annual and quarterly statements,
-quarterly shareholding and the face value, through its JSON-RPC (MCP) endpoint.
+"""India fundamentals from Tapetide (ADR-0015): annual and quarterly statements, quarterly
+shareholding and the face value, through its JSON-RPC (MCP) endpoint.
 
 One company costs six billed calls (four statement sections, one all-sections snapshot for the
-face value, one shareholding); the free plan allows 50 a day, so everything is cached for the
-`fundamentals` TTL and a token or quota failure halts the adapter for the rest of the run (no
-retry that could burn quota). The token is read per call through the secret store and lives in
-no attribute, cache parameter or message. `_fetch` returns JSON-native data; the pure
-mappers below turn it into stored rows after the cache.
+face value, one shareholding). The plan limits come from `fundamentals.providers` and are
+enforced by the local quota ledger (ADR-0016): every request reserves a ledger row first, and the
+adapter refuses to POST at all without a budget. Everything is cached for the `fundamentals` TTL,
+and a token or quota failure halts the adapter for the rest of the run (no retry that could burn
+quota). The token is read per call through the secret store and lives in no attribute, cache
+parameter or message. `_fetch` returns JSON-native data; the pure mappers below turn it into
+stored rows after the cache.
 """
 
 import json
 import math
 import re
+import sqlite3
 import unicodedata
 from calendar import monthrange
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, TypeGuard
 
 import httpx
 
 from nivesh_adapters.base import Adapter
 from nivesh_adapters.edgar import RateLimiter
+from nivesh_adapters.providers import (
+    MAPPING_ERRORS,
+    Capability,
+    CollectContext,
+    FundamentalsProvider,
+    Ident,
+    ProviderInfo,
+    ProviderResult,
+    dedupe_tail,
+)
 from nivesh_adapters.quality import DataQualityError
 from nivesh_adapters.recorder import make_client
-from nivesh_core.errors import MarketDataError, RateLimited, SecretNotFound, SourceUnavailable
+from nivesh_core.errors import (
+    MarketDataError,
+    NotConfigured,
+    QuotaExceeded,
+    RateLimited,
+    SecretNotFound,
+    SourceUnavailable,
+)
 from nivesh_core.market_models import ShareholdingRow
+from nivesh_core.quota import Budget, Outcome
 from nivesh_core.secrets import get_secret
 from nivesh_core.timeutil import utcnow
 from nivesh_engine.statements import PeriodType, StatementRow
@@ -40,15 +62,19 @@ MIN_INTERVAL_S = 1.1  # the vendor allows 60 calls a minute; stay under it
 TIMEOUT_S = 30.0
 SECTIONS = ("quarterly", "profit_loss", "balance_sheet", "cash_flow")
 
-_SET_HINT = (
-    f"create a free token at tapetide.com/settings/tokens, then: nivesh secrets set {SECRET_NAME}"
-)
-_QUOTA = re.compile(r"rate.?limit|quota|too many requests|daily limit|per day", re.I)
+# The monthly alternatives (`monthly limit|quota|cap`, `per month`) are a defensive superset: the
+# vendor's monthly wording was NOT observed. The local ledger is the real monthly guard; this only
+# stops further spend when a reply happens to say so.
+_MONTHLY = r"monthly (?:limit|quota|cap)|per month"
+_QUOTA = re.compile(rf"rate.?limit|quota|too many requests|daily limit|per day|{_MONTHLY}", re.I)
+_MONTHLY_RE = re.compile(_MONTHLY, re.I)
+_DAILY_RE = re.compile(r"daily|per day|/day", re.I)  # daily wording wins when a reply has both
 _NOT_FOUND = re.compile(r"\b(?:company|symbol|section) not found", re.I)
+# narrower than _NOT_FOUND: "Section not found" for a valid company must not stop the others
+_SYMBOL_UNKNOWN = re.compile(r"\b(?:company|symbol) not found", re.I)
 _SSE_DATA = "data:"
-_QUOTA_MSG = (
-    "Tapetide daily quota reached (free plan: 50 calls/day, resets 00:00 IST); "
-    "cached data is used if any"
+_NO_BUDGET = (
+    "Tapetide quota budget not configured: set a plan under fundamentals.providers in nivesh.yaml"
 )
 
 
@@ -84,10 +110,18 @@ MAX_SHARES = Decimal(10) ** 13
 MIN_FACE_VALUE, MAX_FACE_VALUE = Decimal("0.0001"), Decimal(100000)
 
 
+def _real(v: Any) -> TypeGuard[int | float]:
+    """A finite number that is not a bool. An int is always finite: `math.isfinite` raises
+    OverflowError on one above ~1e308, so it is only asked of a float."""
+    if isinstance(v, bool):
+        return False
+    return isinstance(v, int) or (isinstance(v, float) and math.isfinite(v))
+
+
 def _number(label: str, v: Any, bound: float = MAX_CELL) -> None:
     if v is None:
         return
-    if isinstance(v, bool) or not isinstance(v, int | float) or v != v or abs(v) == float("inf"):
+    if not _real(v):
         raise DataQualityError(SOURCE, label, v, "expected a finite number")
     if abs(v) > bound:
         raise DataQualityError(SOURCE, label, v, f"magnitude above {bound:g}")
@@ -123,17 +157,10 @@ def _check_pledge(pledge: Any) -> None:
     if not isinstance(pledge, dict):
         raise DataQualityError(SOURCE, "promoter_pledge", pledge, "expected an object")
     pct = pledge.get("pct_of_promoter_holding")
-    # text, bool, list, NaN and inf are unparsable, so the mapper stores None; decide on the type
-    # first (never `_dec` here: it raises OverflowError on an int above ~1e308)
-    if (
-        isinstance(pct, bool)
-        or not isinstance(pct, int | float)
-        or pct != pct
-        or abs(pct) == float("inf")
-    ):
+    if not _real(pct):  # text, bool, list, NaN and inf are unparsable: the mapper stores None
         return
     _number("pct_of_promoter_holding", pct, 100.0)
-    if pct is not None and pct < 0:
+    if pct < 0:
         raise DataQualityError(SOURCE, "pct_of_promoter_holding", pct, "outside 0..100")
 
 
@@ -149,7 +176,13 @@ class TapetideFundamentals(Adapter):
         self._limiter = limiter
         self._halt_reason: str | None = None
         self._halt_kind: type[MarketDataError] = SourceUnavailable
+        self._secret = SECRET_NAME  # the provider sets both from its spec (`configure`)
+        self._min_interval_s = MIN_INTERVAL_S
         self.calls = 0  # billed (successful) calls made by this instance
+        self._budget: Budget | None = None
+        # symbols the vendor answered "Company/Symbol not found" for (statements), so the caller
+        # can stop asking the remaining sections
+        self.unknown_symbols: set[str] = set()
 
     @property
     def halted(self) -> bool:
@@ -159,13 +192,45 @@ class TapetideFundamentals(Adapter):
         self._halt_reason, self._halt_kind = reason, kind
         return kind(reason)
 
+    def use_budget(self, budget: Budget | None) -> None:
+        """Attach the quota gate every request must pass; without one the adapter sends nothing."""
+        self._budget = budget
+
+    def configure(self, *, secret_name: str, min_interval_s: float) -> None:
+        """The name of the secret to read and the pacing (used unless a limiter was injected)."""
+        self._secret, self._min_interval_s = secret_name, min_interval_s
+
+    def _need_budget(self) -> Budget:
+        if self._budget is None:
+            raise self._halt(NotConfigured, _NO_BUDGET)
+        return self._budget
+
+    def _quota_halt(self, budget: Budget, text: str = "") -> MarketDataError:
+        """The vendor says the quota is spent. Persist that (the month on monthly wording alone,
+        else the day; nothing is ever lowered) so a new process spends no doomed request, then halt.
+        A reply that names both windows fills the day only: the ledger is append-only, so burning
+        the month for a daily limit could not be taken back."""
+        monthly = _MONTHLY_RE.search(text) and not _DAILY_RE.search(text)
+        try:
+            budget.exhaust("month" if monthly else "day")
+            plan = budget.describe()
+        except sqlite3.Error:  # the halt must not depend on the ledger
+            plan = "the configured plan"
+        return self._halt(
+            RateLimited, f"Tapetide quota reached (plan: {plan}); cached data is used if any"
+        )
+
     def _token(self) -> str:
         try:
-            token = "".join(get_secret(SECRET_NAME).split())  # a pasted newline is not part of it
+            token = "".join(get_secret(self._secret).split())  # a pasted newline is not part of it
         except SecretNotFound:
             token = ""
         if not token:
-            raise self._halt(SourceUnavailable, f"{SECRET_NAME} not set; {_SET_HINT}")
+            raise self._halt(
+                NotConfigured,
+                f"{self._secret} not set; create a token at tapetide.com/settings/tokens, then: "
+                f"nivesh secrets set {self._secret}",
+            )
         return token
 
     def _rpc(self, cred: str, tool: str, arguments: dict[str, Any]) -> tuple[str, str]:
@@ -180,11 +245,31 @@ class TapetideFundamentals(Adapter):
             raise SourceUnavailable(f"Tapetide request failed ({type(e).__name__})") from None
 
     def _rpc_inner(self, cred: str, tool: str, arguments: dict[str, Any]) -> tuple[str, str]:
+        budget = self._need_budget()
         if self._limiter is None:
-            self._limiter = RateLimiter(1 / MIN_INTERVAL_S)
+            self._limiter = RateLimiter(1 / max(self._min_interval_s, 1e-6))  # a plan may say 0
         if self._client is None:
             self._client = make_client(self.name)
         self._limiter.wait()
+        try:  # the one chokepoint: no request leaves without a committed ledger row
+            call_id = budget.reserve(tool, arguments.get("symbol"))
+        except QuotaExceeded as e:
+            raise self._halt(QuotaExceeded, str(e)) from None
+        except sqlite3.Error:  # a locked or broken ledger cannot count, so nothing may be spent
+            raise self._halt(SourceUnavailable, "quota ledger unavailable") from None
+        ok = False
+        try:
+            text, error = self._post(budget, self._client, cred, tool, arguments)
+            ok = not error
+            return text, error
+        finally:
+            outcome: Outcome = "ok" if ok else "halted" if self.halted else "error"
+            with suppress(sqlite3.Error):  # the call is counted already; its outcome is advisory
+                budget.settle(call_id, outcome)
+
+    def _post(
+        self, budget: Budget, client: httpx.Client, cred: str, tool: str, arguments: dict[str, Any]
+    ) -> tuple[str, str]:
         body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                 "params": {"name": tool, "arguments": arguments}}  # fmt: skip
         headers = {
@@ -193,15 +278,15 @@ class TapetideFundamentals(Adapter):
             "Accept": "application/json, text/event-stream",
             "User-Agent": "nivesh/0.1",
         }
-        resp = self._client.post(URL, json=body, headers=headers, timeout=TIMEOUT_S)
+        resp = client.post(URL, json=body, headers=headers, timeout=TIMEOUT_S)
         if resp.status_code in (401, 403):
             raise self._halt(
                 SourceUnavailable,
                 f"Tapetide rejected the token (HTTP {resp.status_code}): regenerate it at "
-                f"tapetide.com/settings/tokens and run `nivesh secrets set {SECRET_NAME}`",
+                f"tapetide.com/settings/tokens and run `nivesh secrets set {self._secret}`",
             )
         if resp.status_code == 429:
-            raise self._halt(RateLimited, _QUOTA_MSG)
+            raise self._quota_halt(budget)
         if resp.status_code != 200:
             raise SourceUnavailable(f"Tapetide returned HTTP {resp.status_code}")
         env = _parse_body(resp)
@@ -217,7 +302,7 @@ class TapetideFundamentals(Adapter):
             # scrub the whole text first; the caller truncates, so no token fragment can survive
             clean = scrub_text(" ".join(text.replace(cred, "").split()))
             if "retry-after" in resp.headers or _QUOTA.search(clean):
-                raise self._halt(RateLimited, _QUOTA_MSG)
+                raise self._quota_halt(budget, clean)
             return "", clean
         self.calls += 1
         return text, ""
@@ -225,9 +310,12 @@ class TapetideFundamentals(Adapter):
     def _call(self, tool: str, arguments: dict[str, Any], what: str) -> dict[str, Any]:
         if self._halt_reason is not None:
             raise self._halt_kind(self._halt_reason)
+        self._need_budget()  # before the credential: a budgetless adapter never reads the keychain
         text, error = self._rpc(self._token(), tool, arguments)
         if error:
             if _NOT_FOUND.search(error):
+                if what == "financial statements" and _SYMBOL_UNKNOWN.search(error):
+                    self.unknown_symbols.add(arguments["symbol"])
                 raise SourceUnavailable(f"Tapetide has no {what} for {arguments['symbol']}")
             raise SourceUnavailable(f"Tapetide error: {error[:160]}")
         try:
@@ -339,9 +427,7 @@ def period_end(label: str) -> date | None:
 
 def _dec(v: Any) -> Decimal | None:
     """A finite number as a Decimal; anything else (null, text, dict, nan) is None."""
-    if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v):
-        return None
-    return Decimal(str(v))
+    return Decimal(str(v)) if _real(v) else None
 
 
 def face_value_of(snapshot: Mapping[str, Any] | None) -> Decimal | None:
@@ -503,6 +589,9 @@ def map_shareholding(payload: Mapping[str, Any], today: date) -> Holdings:
     table = payload["data"][0]["data"]
     pledge = _latest_pledge(payload.get("promoter_pledge"))
     out = Holdings()
+    raw_pct = payload["promoter_pledge"].get("pct_of_promoter_holding") if pledge else None
+    if pledge and pledge[1] is None and raw_pct is not None:  # given, but not a number
+        out.skipped.append("shareholding: promoter pledge percentage is not a number, none stored")
     labels = {*(table.get("Promoters") or {}), *(table.get("Public") or {})}
     if not labels:
         out.skipped.append("shareholding: no Promoters or Public rows in the Tapetide table")
@@ -529,3 +618,88 @@ def map_shareholding(payload: Mapping[str, Any], today: date) -> Holdings:
         out.skipped.append(f"shareholding: {len(future)} period(s) end after today, skipped "
                            f"({', '.join(future[:5])})")  # fmt: skip
     return out
+
+
+class TapetideProvider(FundamentalsProvider):
+    """Tapetide (ADR-0015), keyed on the NSE symbol: six billed calls a company, gated by the
+    quota ledger of its plan. Declared filing dates are `tapetide`, guessed ones `tapetide_est`."""
+
+    info = ProviderInfo(
+        name="tapetide", label="Tapetide", sources=(SOURCE, SOURCE_ESTIMATED),
+        capabilities=frozenset({Capability.statements, Capability.shareholding, Capability.pledge}),
+        keyed_on=Ident.nse_symbol, credential=SECRET_NAME, metered=True,
+        revenue_basis=(
+            "vendor net sales; net of excise and indirect taxes where the company reports it so "
+            "(for example ITC)"
+        ),
+        profit_basis=(
+            "consolidated net profit including minority interest; attributable profit is derived "
+            "when `fa` reads it"
+        ),
+        filing_dates="mixed",
+    )  # fmt: skip
+
+    def collect(self, ctx: CollectContext) -> ProviderResult:
+        ta: TapetideFundamentals = (self._make or TapetideFundamentals)()
+        ta.use_budget(ctx.budget)  # replaces any other; without one the adapter sends nothing
+        plan = self.spec.plan
+        ta.configure(
+            secret_name=self.credential_name or SECRET_NAME,
+            min_interval_s=plan.min_interval_s if plan else MIN_INTERVAL_S,
+        )
+        sym, start = ctx.sec.symbol, len(ctx.failed)
+        got: dict[str, Any] = {}
+        for section in SECTIONS:
+            params = {"resource": "financials", "symbol": sym, "section": section}
+            doc = ctx.get(ta, params, "fundamentals", f"{sym} {section}", soft=True)
+            if doc is not None:
+                got[section] = doc
+            if sym in ta.unknown_symbols:  # the vendor does not know it: the rest cost quota
+                break
+        snapshot = holding = None
+        if got:  # a face value and the shareholding are worth a call only when statements exist
+            snapshot = ctx.get(ta, {"resource": "financials", "symbol": sym, "section": "snapshot"},
+                               "fundamentals", f"{sym} snapshot", soft=True)  # fmt: skip
+            holding = ctx.get(ta, {"resource": "shareholding", "symbol": sym}, "fundamentals",
+                              f"{sym} shareholding", soft=True)  # fmt: skip
+        dedupe_tail(ctx.failed, start)
+        res = ProviderResult(calls=ta.calls)
+        try:
+            mapped = map_statements(got, face_value_of(snapshot), ctx.today)
+        except MAPPING_ERRORS as e:
+            ctx.failed.append(f"fundamentals {sym} statements: unusable Tapetide data ({e})"[:200])
+            mapped = Statements()
+        res.skipped = mapped.skipped
+        if got and len(got) < len(SECTIONS):
+            res.notes.append("missing Tapetide sections: " + ", ".join(
+                s for s in SECTIONS if s not in got))  # fmt: skip
+        shares: list[ShareholdingRow] = []
+        if holding is not None:
+            try:
+                hm = map_shareholding(holding, ctx.today)
+                shares, res.clamped = hm.rows, hm.clamped
+                res.skipped = [*res.skipped, *hm.skipped]
+            except MAPPING_ERRORS as e:
+                ctx.failed.append(f"fundamentals {sym} shareholding: unusable data ({e})"[:200])
+        if not (mapped.reported or mapped.estimated):
+            return res  # no statements: no shareholding stored either (the fallback may serve)
+        res.clamped += mapped.clamped
+        res.estimated = len(mapped.estimated)
+        total = len(mapped.reported) + res.estimated
+        if res.estimated:
+            res.notes.append(
+                f"{res.estimated} of {total} rows carry an estimated filing date "
+                "(history before about Sep 2024 is approximate)"
+            )
+        if res.clamped:
+            res.notes.append(f"{res.clamped} filing dates after today were set to today")
+        res.notes.append(f"profit basis: {self.info.profit_basis}")  # declared; no gap here
+        if mapped.early:
+            res.notes.append(
+                f"{len(mapped.early)} filing dates before the period end were set to the period "
+                f"end ({', '.join(mapped.early[:5])}{', ...' if len(mapped.early) > 5 else ''})"
+            )
+        res.groups = [(SOURCE, mapped.reported), (SOURCE_ESTIMATED, mapped.estimated)]
+        res.supersede = SOURCE_ESTIMATED
+        res.shareholding, res.shareholding_source = shares, SOURCE_ESTIMATED
+        return res

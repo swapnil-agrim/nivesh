@@ -18,9 +18,17 @@ import httpx
 
 from nivesh_adapters.base import Adapter
 from nivesh_adapters.prices_in import http_get
+from nivesh_adapters.providers import (
+    Capability,
+    CollectContext,
+    FundamentalsProvider,
+    Ident,
+    ProviderInfo,
+    ProviderResult,
+)
 from nivesh_adapters.quality import DataQualityError, parse_decimal
 from nivesh_adapters.recorder import make_client
-from nivesh_core.errors import SourceUnavailable
+from nivesh_core.errors import NotConfigured, SourceUnavailable
 from nivesh_core.market_models import ShareholdingRow
 from nivesh_core.timeutil import utcnow
 from nivesh_engine.statements import PeriodType, StatementRow
@@ -50,6 +58,7 @@ TAGS: dict[str, str] = {
 }
 PCT_ITEMS = {"gnpa_pct", "nnpa_pct", "nim_pct", "casa_pct", "car_pct"}
 SCALE = {"lakh": Decimal(100000), "crore": Decimal(10000000)}
+MAX_RESULT_FILINGS = 32  # about eight years of quarterly results
 _FORBIDDEN = re.compile(r"<!\s*(DOCTYPE|ENTITY)", re.I)
 
 
@@ -205,3 +214,52 @@ class IndiaFundamentals(Adapter):
         if resource == "shareholding":
             return self._json(SHAREHOLDING, {"scripcode": params["scrip"]}), utcnow()
         raise ValueError(f"unknown resource {resource!r}")
+
+
+class BseProvider(FundamentalsProvider):
+    """BSE exchange XBRL results plus the shareholding pattern, keyed on the BSE scrip code. Its
+    tag mapping and endpoints are unverified (deferred D2, D3), so it is the fallback."""
+
+    info = ProviderInfo(
+        name="bse_xbrl", label="BSE XBRL filings", sources=(SOURCE,),
+        capabilities=frozenset({Capability.statements, Capability.shareholding, Capability.pledge,
+                                Capability.bank_metrics}),  # bank metrics: per spec, UNVERIFIED
+        keyed_on=Ident.bse_code, credential=None, metered=False,
+        revenue_basis="revenue from operations as filed, consolidated where the filing has it",
+        profit_basis="profit or loss for the period as filed, consolidated where the filing has it",
+        filing_dates="declared",
+    )  # fmt: skip
+
+    def collect(self, ctx: CollectContext) -> ProviderResult:
+        code = ctx.master.alias_of(ctx.sec.id, "bse_code")
+        if code is None:
+            raise NotConfigured(
+                "no statements from the primary providers and no BSE scrip code for the "
+                "fallback; run `nivesh master build`"
+            )
+        fi: IndiaFundamentals = (self._make or IndiaFundamentals)()
+        index = ctx.get(fi, {"resource": "results_index", "scrip": code}, "fundamentals")
+        filings, ignored = [], 0
+        for item in sorted(index or [], key=lambda i: i["period_end"], reverse=True)[
+            :MAX_RESULT_FILINGS
+        ]:
+            if date.fromisoformat(item["filed_at"]) > ctx.today:
+                ignored += 1  # a filing cannot be known before it is filed
+                continue
+            doc = ctx.get(
+                fi,
+                {"resource": "results_xbrl", "url": item["xbrl_url"], "filed_at": item["filed_at"]},
+                "fundamentals",
+            )
+            if doc is not None:
+                filings.append(parse_results_xbrl(doc["xml"], date.fromisoformat(doc["filed_at"])))
+        rows, _basis = prefer_consolidated(filings)
+        raw = ctx.get(fi, {"resource": "shareholding", "scrip": code}, "fundamentals")
+        holding = parse_shareholding(raw) if raw is not None else []
+        known = [h for h in holding if h.filed_at <= ctx.today]
+        ignored += len(holding) - len(known)
+        res = ProviderResult(groups=[(SOURCE, rows)], shareholding=known)
+        res.skipped = [s for f in filings for s in f.skipped]
+        if ignored:
+            res.skipped.append(f"{ignored} BSE filings dated after {ctx.today} ignored")
+        return res

@@ -1,0 +1,93 @@
+{
+  "_comment": "UNVERIFIED: hand-written from the public API documentation, not from a live response. Synthetic figures in crore for tests only; field names beyond the documented ones are guesses. There is no pledge field and no filing date in the documented reply.",
+  "status": "success",
+  "data": {
+    "categories": [
+      {
+        "category": "promoters",
+        "history": [
+          {
+            "period": "Mar 2025",
+            "value": 50.3
+          },
+          {
+            "period": "Dec 2025",
+            "value": 50.1
+          },
+          {
+            "period": "Jun 2026",
+            "value": 50.0
+          }
+        ]
+      },
+      {
+        "category": "fii",
+        "history": [
+          {
+            "period": "Mar 2025",
+            "value": 19.5
+          },
+          {
+            "period": "Dec 2025",
+            "value": 19.75
+          },
+          {
+            "period": "Jun 2026",
+            "value": 20.0
+          }
+        ]
+      },
+      {
+        "category": "other_dii",
+        "history": [
+          {
+            "period": "Mar 2025",
+            "value": 5.25
+          },
+          {
+            "period": "Dec 2025",
+            "value": 5.25
+          },
+          {
+            "period": "Jun 2026",
+            "value": 5.5
+          }
+        ]
+      },
+      {
+        "category": "mutual_funds",
+        "history": [
+          {
+            "period": "Mar 2025",
+            "value": 7.0
+          },
+          {
+            "period": "Dec 2025",
+            "value": 7.25
+          },
+          {
+            "period": "Jun 2026",
+            "value": 7.5
+          }
+        ]
+      },
+      {
+        "category": "retail_and_other",
+        "history": [
+          {
+            "period": "Mar 2025",
+            "value": 17.95
+          },
+          {
+            "period": "Dec 2025",
+            "value": 17.65
+          },
+          {
+            "period": "Jun 2026",
+            "value": 17.0
+          }
+        ]
+      }
+    ]
+  }
+}

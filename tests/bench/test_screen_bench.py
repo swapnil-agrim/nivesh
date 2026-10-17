@@ -20,6 +20,7 @@ from nivesh_core.analysis_config import AnalysisSettings
 from nivesh_core.db import init_stores
 from nivesh_core.db.duck import open_duck
 from nivesh_core.db.sqlite import open_sqlite
+from nivesh_core.fundamentals_config import FundamentalsSettings
 from nivesh_core.market_store import write_estimates, write_fundamentals
 from nivesh_core.security_master import build_master
 from nivesh_engine.metrics import inputs_needed
@@ -28,6 +29,7 @@ from tests.analysis_fx import annual_rows, day, universe_book
 from tests.market_fx import mrow
 
 D = Decimal
+FUND = FundamentalsSettings()
 N, BARS = 1000, 500
 ASOF = day(BARS - 1)
 TABLES = ("price_bar", "corp_action", "fundamental", "shareholding", "estimate", "filing")
@@ -100,7 +102,9 @@ def test_screen_1000_securities_under_60_seconds(tmp_path: Path) -> None:
     )  # fmt: skip
     spy = Recording(duck)
     start = time.perf_counter()
-    inputs = load_screen_inputs(spy, sql, ids, ASOF, cfg, needs=inputs_needed(metrics))
+    inputs = load_screen_inputs(
+        spy, sql, ids, ASOF, cfg, needs=inputs_needed(metrics), fundamentals=FUND
+    )
     loaded = time.perf_counter()
     res = screen(inputs, rules, as_of=ASOF, cfg=cfg)
     done = time.perf_counter()

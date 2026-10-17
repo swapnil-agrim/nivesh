@@ -5,6 +5,7 @@ checks the Authorization header the way the real endpoint does (401 without it).
 """
 
 import json
+import sqlite3
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
@@ -19,7 +20,10 @@ from nivesh_adapters.fundamentals_tapetide import (
     map_shareholding,
     map_statements,
 )
+from nivesh_core.db import MIGRATIONS, migrate
+from nivesh_core.fundamentals_config import PlanSettings
 from nivesh_core.market_models import ShareholdingRow
+from nivesh_core.quota import Budget
 from nivesh_engine.statements import StatementRow
 
 FX = Path(__file__).resolve().parent / "fixtures" / "market"
@@ -107,11 +111,33 @@ def client(server: Any) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(server))
 
 
-def adapter(server: Any, sleeps: list[float] | None = None) -> TapetideFundamentals:
-    """An adapter whose pacing runs on a fake clock (no real sleeping)."""
+def ledger(path: Path | str = ":memory:") -> sqlite3.Connection:
+    """A SQLite store at the latest schema (autocommit, as in production); in memory by default."""
+    conn = sqlite3.connect(path, isolation_level=None)
+    migrate.apply(conn, MIGRATIONS / "sqlite")
+    return conn
+
+
+def memory_budget(
+    conn: sqlite3.Connection | None = None, *, daily: int | None = 10000,
+    monthly: int | None = 100000, **kw: Any,
+) -> Budget:  # fmt: skip
+    """A generous budget on an in-memory ledger unless limits or a connection are given; `kw` go
+    to `Budget` (`priority`, `now`)."""
+    plan = PlanSettings(daily=daily, monthly=monthly)
+    return Budget(conn or ledger(), "tapetide", plan, **kw)
+
+
+def adapter(
+    server: Any, sleeps: list[float] | None = None, budget: Budget | None = None
+) -> TapetideFundamentals:
+    """An adapter whose pacing runs on a fake clock (no real sleeping), with a generous in-memory
+    budget unless one is passed (the adapter refuses to POST without one)."""
     log = sleeps if sleeps is not None else []
     limiter = RateLimiter(1 / 1.1, lambda: 0.0, log.append)
-    return TapetideFundamentals(client(server), limiter=limiter)
+    ad = TapetideFundamentals(client(server), limiter=limiter)
+    ad.use_budget(budget or memory_budget())
+    return ad
 
 
 TODAY = date(2026, 10, 13)

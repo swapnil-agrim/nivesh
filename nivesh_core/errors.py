@@ -36,3 +36,13 @@ class RateLimited(MarketDataError):
 
 class SourceUnavailable(MarketDataError):
     """The source is down, blocked or returned an unexpected HTTP status."""
+
+
+class NotConfigured(SourceUnavailable):
+    """A source cannot be called until the owner sets it up (a credential, an identifier, a
+    budget); nothing was requested."""
+
+
+class QuotaExceeded(RateLimited):
+    """The local quota ledger refuses the call: a window of the vendor plan has no calls left.
+    A halt the vendor itself reports is a plain `RateLimited`; the adapter then fills the ledger."""

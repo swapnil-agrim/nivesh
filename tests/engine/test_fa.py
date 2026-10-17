@@ -3,7 +3,16 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from nivesh_core.analysis_config import AnalysisSettings
+from nivesh_engine.attributable import (
+    CONSOLIDATED,
+    EPS_X_SHARES,
+    NO_MINORITY,
+    REPORTED_MINORITY,
+    UNKNOWN,
+)
 from nivesh_engine.fa import FaResult, fa_compute, sector_kind_of
 from nivesh_engine.metric import Metric
 from nivesh_engine.statements import (
@@ -62,10 +71,12 @@ def run(
     as_of: date = ASOF,
     kind: str = "general",
     market: str | None = None,
+    revenue_basis: str | None = None,
 ) -> FaResult:
     return fa_compute(
-        rows, shareholding or [], as_of=as_of, sector_kind=kind, cfg=CFG, market=market
-    )
+        rows, shareholding or [], as_of=as_of, sector_kind=kind, cfg=CFG, market=market,
+        revenue_basis=revenue_basis,
+    )  # fmt: skip
 
 
 def us() -> FaResult:
@@ -402,7 +413,8 @@ def test_reliance_recorded_rows_give_growth_margin_roe_leverage_and_pledge() -> 
     res = recorded("RELIANCE")
     assert res.sector_kind == "general"
     is_close(res, "revenue_cagr_3y_pct", str(want), D("0.0001"))
-    is_close(res, "net_margin_pct", str(D(95754) / D(1055780) * 100), D("0.0001"))
+    # attributable profit: EPS 59.69 x 1353.2 crore shares = 80772.508 crore, not 95754 (#131)
+    is_close(res, "net_margin_pct", str(D("80772.508") / D(1055780) * 100), D("0.0001"))
     assert get(res, "roe_pct").available
     is_close(res, "debt_equity", str(D(402962) / D(13532 + 890498)), D("0.0001"))
     unavailable(res, "operating_margin_pct", "profit before tax")
@@ -449,3 +461,186 @@ def test_fa_compute_is_deterministic() -> None:
     res = us()
     for m in res.metrics.values():
         assert m.value is None or isinstance(m.value, Decimal)
+
+
+# ---- attributable profit, India only (#131) -----------------------------------------------------
+# EPS 1 x 100 shares = 100 is the parent's profit; consolidated net income is 125 (+25 percent).
+IN_BOOK: dict[str, list[str | int]] = {
+    "revenue": [900, 1000], "net_income": [90, 125], "total_equity": [400, 500],
+    "eps": ["x", 1], "shares_out": ["x", 100], "cfo": ["x", 130], "total_assets": ["x", 1000],
+}  # fmt: skip
+
+
+def india(book: dict[str, list[str | int]] | None = None, **kw: object) -> FaResult:
+    return run(annual_rows(book or IN_BOOK, currency="INR"), market="IN", **kw)  # type: ignore[arg-type]
+
+
+def test_india_net_margin_and_roe_use_attributable_profit_and_show_both_bases() -> None:
+    res = india()
+    is_close(res, "net_margin_pct", "10")  # 100 / 1000, not 125 / 1000
+    is_close(res, "roe_pct", str(D(100) / D(450) * 100))  # average of 400 and 500
+    for name in ("net_margin_pct", "roe_pct"):
+        m = get(res, name)
+        assert m.inputs["net_income"] == D(100) and m.inputs["net_income_consolidated"] == D(125)
+        assert m.inputs["profit_basis"] == EPS_X_SHARES and m.inputs["profit_gap_pct"] == D("25.00")
+        assert "profit_reason" not in m.inputs
+    assert get(res, "net_margin_pct").inputs["revenue"] == D(1000)
+    assert get(res, "roe_pct").inputs["average_equity"] == D(450)
+
+
+def test_india_a_gap_inside_three_percent_means_no_minority_detected() -> None:
+    res = india({**IN_BOOK, "net_income": [90, 102]})  # +2.00 percent
+    is_close(res, "net_margin_pct", "10.2")
+    m = get(res, "net_margin_pct")
+    assert m.inputs["profit_basis"] == NO_MINORITY and m.inputs["profit_gap_pct"] == D("2.00")
+
+
+def test_india_a_reported_minority_interest_is_preferred() -> None:
+    res = india({**IN_BOOK, "minority_interest": ["x", 20]})
+    is_close(res, "net_margin_pct", "10.5")  # 125 - 20
+    m = get(res, "roe_pct")
+    assert m.inputs["profit_basis"] == REPORTED_MINORITY and m.inputs["profit_gap_pct"] is None
+    assert m.inputs["net_income"] == D(105) and m.inputs["net_income_consolidated"] == D(125)
+
+
+@pytest.mark.parametrize(
+    ("book", "reason"),
+    [
+        ({k: v for k, v in IN_BOOK.items() if k != "eps"}, "no eps"),
+        ({k: v for k, v in IN_BOOK.items() if k != "shares_out"}, "no shares_out"),
+        ({**IN_BOOK, "net_income": [90, 90]}, "-10.00% against EPS x shares"),  # not a minority
+        # shares_out exists for an older year only: the latest fiscal year has none
+        ({**IN_BOOK, "shares_out": [100, "x"], "eps": [1, "x"]}, "no eps and shares_out"),
+    ],
+)
+def test_india_underivable_attributable_keeps_the_consolidated_figure_labelled_with_the_reason(
+    book: dict[str, list[str | int]], reason: str
+) -> None:
+    res = india(book)
+    ni = D(book["net_income"][-1])
+    is_close(res, "net_margin_pct", str(ni / 10))  # the consolidated figure, not dropped
+    is_close(res, "roe_pct", str(ni / D(450) * 100))
+    for name in ("net_margin_pct", "roe_pct"):
+        m = get(res, name)
+        assert m.available and m.inputs["profit_basis"] == UNKNOWN, name
+        assert m.inputs["net_income"] == ni == m.inputs["net_income_consolidated"], name
+        assert reason in str(m.inputs["profit_reason"]), name
+
+
+def test_india_coverage_is_not_lowered_by_a_missing_minority_figure() -> None:
+    with_eps, without = india(), india({k: v for k, v in IN_BOOK.items() if k != "eps"})
+    assert with_eps.coverage_pct == without.coverage_pct
+    assert [n for n, m in without.metrics.items() if not m.available] == [
+        n for n, m in with_eps.metrics.items() if not m.available
+    ]  # fmt: skip
+
+
+def test_india_without_consolidated_net_income_the_metric_is_unavailable_not_labelled() -> None:
+    book = {k: v for k, v in IN_BOOK.items() if k != "net_income"}
+    res = india(book)
+    unavailable(res, "net_margin_pct", "no net_income")
+    unavailable(res, "roe_pct", "net_income")
+
+
+def test_india_consolidated_only_metrics_stay_consolidated_and_are_labelled() -> None:
+    book: dict[str, list[str | int]] = {
+        **IN_BOOK, "revenue": [800, 900, 1000, 1100], "net_income": [80, 90, 100, 125],
+        "eps": ["x", "x", "x", 1], "shares_out": ["x", "x", "x", 100],
+        "cfo": ["x", "x", "x", 130], "total_assets": ["x", "x", "x", 1000],
+        "total_equity": ["x", "x", 400, 500],
+    }  # fmt: skip
+    res = india(book)
+    is_close(res, "cfo_to_pat", "1.04")  # 130 / 125: CFO is consolidated, so is the profit
+    is_close(res, "accruals_ratio_pct", "-0.5")  # (125 - 130) / 1000
+    cagr = get(res, "net_income_cagr_3y_pct")
+    assert cagr.inputs["start"] == D(80) and cagr.inputs["end"] == D(125)  # not 100
+    for name in ("cfo_to_pat", "accruals_ratio_pct", "net_income_cagr_3y_pct"):
+        assert get(res, name).inputs["profit_basis"] == CONSOLIDATED, name
+    assert "profit_basis" not in get(res, "eps_cagr_3y_pct").inputs  # per share already
+    short = india({"revenue": [1000], "net_income": [100]})  # unavailable, still labelled
+    assert get(short, "net_income_cagr_3y_pct").inputs["profit_basis"] == CONSOLIDATED
+    assert get(short, "cfo_to_pat").inputs["profit_basis"] == CONSOLIDATED
+
+
+def not_eps_growth(res: FaResult) -> dict[str, Metric]:
+    return {k: v for k, v in res.metrics.items() if not k.startswith("eps_cagr")}
+
+
+def test_us_output_is_untouched_by_eps_shares_and_never_labelled() -> None:
+    book: dict[str, list[str | int]] = {**US_BOOK, "eps": [1], "shares_out": [20]}  # +400 percent
+    plain, withshares = run(annual_rows(US_BOOK), market="US"), run(annual_rows(book), market="US")
+    assert not_eps_growth(withshares) == not_eps_growth(plain)  # EPS growth just counts rows
+    assert withshares.coverage_pct == plain.coverage_pct
+    is_close(withshares, "net_margin_pct", "10")
+    is_close(withshares, "roe_pct", "20")
+    assert get(withshares, "net_margin_pct").inputs["net_income"] == D(100)
+    shown = {k for m in withshares.metrics.values() for k in m.inputs}
+    assert not shown & {"profit_basis", "profit_gap_pct", "net_income_consolidated",
+                        "profit_reason", "revenue_basis", "scope"}  # fmt: skip
+    stamped = run(annual_rows(US_BOOK), market="US", revenue_basis="ignored for the US")
+    assert stamped == plain
+
+
+def test_india_revenue_basis_is_stamped_on_revenue_based_metrics_only() -> None:
+    basis = "vendor net sales; net of excise where reported"
+    res = india({**IN_BOOK, "revenue": [800, 900, 1000, 1100], "net_income": [80, 90, 100, 125],
+                 "eps": ["x", "x", "x", 1], "shares_out": ["x", "x", "x", 100]},
+                revenue_basis=basis)  # fmt: skip
+    assert get(res, "net_margin_pct").inputs["revenue_basis"] == basis
+    assert get(res, "revenue_cagr_3y_pct").inputs["revenue_basis"] == basis
+    stamped = {n for n, m in res.metrics.items() if "revenue_basis" in m.inputs}
+    assert stamped == {"net_margin_pct", "revenue_cagr_3y_pct"}
+    short = india(revenue_basis=basis)  # an unavailable growth rate says the basis too
+    assert get(short, "revenue_cagr_3y_pct").inputs["revenue_basis"] == basis
+    assert "revenue_basis" not in get(india(), "net_margin_pct").inputs  # none declared: none shown
+
+
+# ---- India on the recorded statements: the numbers that change by design ------------------------
+def consolidated_only(company: str) -> list[StatementRow]:
+    """The recorded rows without EPS, so the profit stays consolidated and labelled unknown."""
+    return [r for r in tx.recorded_rows(company) if r.item != "eps"]
+
+
+@pytest.mark.parametrize(
+    ("company", "kind", "attributable", "consolidated"),
+    [
+        ("RELIANCE", "general", "9.2457785", "10.9606634"),  # was 10.96
+        ("HDFCBANK", "financial", "13.7223175", "14.3014204"),  # was 14.30
+    ],
+)
+def test_recorded_roe_is_lower_on_the_attributable_profit(
+    company: str, kind: str, attributable: str, consolidated: str
+) -> None:
+    res = recorded(company, kind)
+    is_close(res, "roe_pct", attributable, D("0.0001"))
+    assert get(res, "roe_pct").inputs["profit_basis"] == EPS_X_SHARES
+    old = run(consolidated_only(company), shareholding=tx.recorded_shareholding(),
+              as_of=INDIA_ASOF, kind=kind, market="IN")  # fmt: skip
+    is_close(old, "roe_pct", consolidated, D("0.0001"))
+    assert get(old, "roe_pct").inputs["profit_basis"] == UNKNOWN
+
+
+def test_recorded_hdfcbank_margin_uses_the_attributable_profit() -> None:
+    res = recorded("HDFCBANK", "financial")
+    is_close(res, "net_margin_pct", str(D("76011.21") / D(348615) * 100), D("0.0001"))  # not 79219
+    m = get(res, "net_margin_pct")
+    assert m.inputs["profit_gap_pct"] == D("4.22") and m.inputs["profit_basis"] == EPS_X_SHARES
+
+
+def test_recorded_reliance_shows_both_bases_and_keeps_cash_conversion_consolidated() -> None:
+    res = recorded("RELIANCE")
+    m = get(res, "net_margin_pct")
+    assert m.inputs["net_income"] == D("807725080000") and m.inputs["profit_gap_pct"] == D("18.55")
+    assert m.inputs["net_income_consolidated"] == D("957540000000")
+    is_close(res, "cfo_to_pat", str(D(192113) / D(95754)), D("0.0001"))
+    assert get(res, "cfo_to_pat").inputs["profit_basis"] == CONSOLIDATED
+
+
+def test_recorded_itc_detects_no_minority_and_quotes_the_revenue_basis() -> None:
+    basis = "vendor net sales; net of excise and indirect taxes where the company reports it so"
+    res = run(tx.recorded_rows("ITC"), shareholding=tx.recorded_shareholding(), as_of=INDIA_ASOF,
+              market="IN", revenue_basis=basis)  # fmt: skip
+    m = get(res, "net_margin_pct")
+    assert m.inputs["profit_basis"] == NO_MINORITY and m.inputs["profit_gap_pct"] == D("1.60")
+    assert m.inputs["revenue_basis"] == basis
+    is_close(res, "net_margin_pct", str(D(21018) / D(78868) * 100), D("0.0001"))  # consolidated

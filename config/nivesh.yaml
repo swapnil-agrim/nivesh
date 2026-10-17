@@ -35,8 +35,9 @@ tax:
   # means 366 for strictly more than 365.
 
 # E4 market data. Secrets are refs; the EDGAR contact is read only from the secret EDGAR_CONTACT.
-# India statements come from Tapetide (free plan): `nivesh secrets set TAPETIDE_TOKEN`; the value
-# is read from the keychain or env at call time and never appears in this file (ADR-0015).
+# India statements come from Tapetide (plan limits: see `fundamentals:` below): `nivesh secrets set
+# TAPETIDE_TOKEN`; the value is read from the keychain or env at call time and never appears in
+# this file (ADR-0015).
 # Series ids and feed urls are per spec, unverified; price wire formats verified 2026-10-13.
 market:
   edgar_max_per_sec: 8        # SEC allows 10
@@ -70,6 +71,25 @@ market:
     2026: [2026-01-15, 2026-01-26, 2026-03-03, 2026-03-26, 2026-03-31, 2026-04-03, 2026-04-14,
            2026-05-01, 2026-05-28, 2026-06-26, 2026-09-14, 2026-10-02, 2026-10-20, 2026-11-10,
            2026-11-24, 2026-12-25]
+
+# Fundamentals providers (ADR-0016), example only and equal to the built-in defaults. Order is
+# priority: when two providers store the same figure, the first enabled one is read. `plan` holds
+# the vendor plan limits as the OWNER knows them (nothing is read from the vendor): the local
+# ledger refuses the call that would pass `daily` or `monthly` (IST day, IST month starting on
+# `month_start_day`), and `reserve_pct` keeps that share of each window for holdings first, then
+# the watchlist. A secret is only ever a ref:NAME name (`nivesh secrets set NAME`); leave the key
+# out when a provider has none. `bse_xbrl` is the fallback, used only when no primary stored
+# statements. `upstox` is disabled and every wire format in its adapter is UNVERIFIED.
+fundamentals:
+  providers:
+    - name: tapetide
+      enabled: true
+      role: primary
+      plan: {daily: 400, monthly: 5000, min_interval_s: 1.1, month_start_day: 1, reserve_pct: {watchlist: 10, universe: 30}}
+      credential: ref:TAPETIDE_TOKEN
+    - {name: bse_xbrl, enabled: true, role: fallback}
+    - {name: upstox, enabled: false, role: primary, credential: ref:UPSTOX_ANALYTICS_TOKEN}
+  compare: {statements_tolerance_pct: 1, shareholding_tolerance_pp: 0.5}
 
 # E5 mutual funds: owner-set parameters, example only (nothing here is advice). Wire formats of
 # MFapi.in, AMFI NAVAll and the monthly-holdings source are per spec, unverified. The holdings

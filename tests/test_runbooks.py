@@ -59,3 +59,16 @@ def test_scorecard_runbook_names_the_commands_in_order_and_has_no_pii() -> None:
     for needle in ("price index", "not enough data", "--corrects", "not advice"):
         assert needle in text, needle
     assert scan_text(text) == []
+
+
+def test_add_a_provider_runbook_names_the_seam_the_secret_and_the_contract_suite() -> None:
+    text = (ROOT / "docs" / "runbooks" / "add-a-provider.md").read_text()
+    flat = " ".join(text.split())
+    for needle in (
+        "FundamentalsProvider", "ProviderInfo", "BUILTIN", "nivesh secrets set",
+        "tests/provider_fx.py", "MARKET_ADAPTERS", "UNVERIFIED", "make_client", "NotConfigured",
+        "fundamentals.providers", "contract", "Adapter", "get_secret", "concatenation",
+        "enabled: false", "plan", "no live call",
+    ):  # fmt: skip
+        assert needle in flat, needle
+    assert scan_text(text) == []

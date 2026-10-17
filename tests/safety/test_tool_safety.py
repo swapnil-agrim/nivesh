@@ -160,7 +160,7 @@ def test_holdings_server_has_no_write_tool_and_no_write_words_in_descriptions() 
 MARKET_SERVERS = ("market", "fundamentals", "filings", "news", "macro")
 MARKET_ADAPTERS = {
     "MasterSources", "IndiaPrices", "UsPrices", "Edgar", "IndiaFundamentals", "MacroFetch",
-    "Estimates", "Feeds", "TapetideFundamentals",
+    "Estimates", "Feeds", "TapetideFundamentals", "UpstoxFundamentals",
 }  # fmt: skip
 
 
