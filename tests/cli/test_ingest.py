@@ -10,9 +10,9 @@ from typer.testing import CliRunner
 from nivesh_adapters import cas
 from nivesh_cli.main import app
 from nivesh_core.db import init_stores
-from nivesh_core.pii_scan import scan_text
 from tests import pii_values as pv
 from tests.cas_models import demat_data, pii_strings, rta_data
+from tests.scan_fx import scan_output
 
 runner = CliRunner()
 Env = tuple[list[str], Path]
@@ -119,10 +119,10 @@ def test_ingest_bad_file_exits_1_and_still_ingests_others(
     assert pv.holder_name() not in r.output and "cas_rta" in r.output
 
 
-def test_ingest_output_contains_no_pii(ready: Env) -> None:
+def test_ingest_output_contains_no_pii(ready: Env, tmp_path: Path) -> None:
     args, _ = ready
     r = runner.invoke(app, [*args, "ingest"])
-    assert scan_text(r.output) == []
+    assert scan_output(r.output, tmp_path) == []
     for pii in pii_strings():
         assert pii not in r.output
 

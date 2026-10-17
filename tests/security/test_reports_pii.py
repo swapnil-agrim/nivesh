@@ -20,6 +20,7 @@ from tests.cli.test_ideas_report_cli import clean_pm
 from tests.delivery_fx import DUMMY_HOOK, Calls, FakeSmtp, body_json
 from tests.ideas_fx import ASOF, seed_ideas_store, with_benchmarks
 from tests.run_paths import run_path
+from tests.scan_fx import request_text, scan_output
 
 ROOT = Path(__file__).resolve().parents[2]
 runner = CliRunner()
@@ -39,7 +40,9 @@ def call(env: Env, *args: str) -> Any:
     return runner.invoke(app, [*env[0], *args])
 
 
-def test_full_run_leaves_no_pii_in_run_dir_report_md_html_input_json_or_trace(env: Env) -> None:
+def test_full_run_leaves_no_pii_in_run_dir_report_md_html_input_json_or_trace(
+    env: Env, tmp_path: Path
+) -> None:
     r = call(env, "research", "AAA")
     b = call(env, "brief", "both")
     assert r.exit_code == 0 and b.exit_code == 0, (r.output, b.output)
@@ -49,7 +52,7 @@ def test_full_run_leaves_no_pii_in_run_dir_report_md_html_input_json_or_trace(en
         names = {p.name for p in files}
         assert {"report.md", "report.html", "report_input.json", "report.json"} <= names
         assert scan_paths(files) == [], d
-    assert scan_text(r.output) == [] and scan_text(b.output) == []
+    assert scan_output(r.output, tmp_path) == [] and scan_output(b.output, tmp_path) == []
 
 
 def test_delivered_payloads_pass_scan_text(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -68,7 +71,7 @@ def test_delivered_payloads_pass_scan_text(env: Env, monkeypatch: pytest.MonkeyP
     assert call(env, "research", "AAA", "--deliver").exit_code == 0
     assert len(calls.requests) == 3 and len(smtp.sent) == 1
     bodies = [parse_qs(calls.requests[0].content.decode())["text"][0]]  # telegram text
-    bodies += [calls.requests[1].content.decode(errors="replace")]  # telegram page
+    bodies += [request_text(calls.requests[1])]  # telegram page, multipart boundary masked
     bodies += [body_json(calls.requests[2])["text"]]  # slack
     mail = smtp.sent[0]
     bodies += [mail.get_body(preferencelist=("plain",)).get_content()]  # type: ignore[union-attr]
