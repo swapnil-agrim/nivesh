@@ -13,11 +13,11 @@ from nivesh_adapters.master_sources import URLS, MasterSources
 from nivesh_adapters.prices_in import IndiaPrices
 from nivesh_adapters.prices_us import UsPrices
 from nivesh_cli.main import app
-from nivesh_core.pii_scan import scan_text
 from tests import pii_values as pv
 from tests import tapetide_fx as tx
 from tests.conftest import MemoryKeyring
 from tests.market_fx import Feed
+from tests.scan_fx import scan_output
 
 FX = Path(__file__).resolve().parents[1] / "fixtures" / "market"
 runner = CliRunner()
@@ -152,9 +152,9 @@ def test_master_build_from_cache_twice_gives_identical_output(cli_env: Env, net:
     assert "inserted 0, updated 0" in second.output
 
 
-def test_master_build_output_contains_no_pii(cli_env: Env, net: Net) -> None:
+def test_master_build_output_contains_no_pii(cli_env: Env, net: Net, tmp_path: Path) -> None:
     r = runner.invoke(app, [*cli_env[0], "master", "build"])
-    assert scan_text(r.output) == [] and pv.edgar_contact() not in r.output
+    assert scan_output(r.output, tmp_path) == [] and pv.edgar_contact() not in r.output
 
 
 def test_master_build_prints_conflicts_and_rows_dropped(cli_env: Env, net: Net) -> None:
@@ -240,11 +240,11 @@ def test_market_prices_2025_range_succeeds_without_config_entry(cli_env: Env, pr
     assert "bars 4" in r.output and "gaps: none" in r.output
 
 
-def test_market_prices_output_has_no_pii(cli_env: Env, prices: Feed) -> None:
+def test_market_prices_output_has_no_pii(cli_env: Env, prices: Feed, tmp_path: Path) -> None:
     prices.fail = {"yahoo"}
     r = prices_cmd(cli_env[0], "RELIANCE", "--start", "2026-01-22", "--end", "2026-01-28")
     assert r.exit_code == 0 and "failed source yahoo" in r.output
-    assert scan_text(r.output) == [] and pv.edgar_contact() not in r.output
+    assert scan_output(r.output, tmp_path) == [] and pv.edgar_contact() not in r.output
 
 
 # fundamentals ---------------------------------------------------------------------------------
@@ -297,12 +297,12 @@ def funds(cli_env: Env, net: Net, tape: tx.Tapetide, monkeypatch: pytest.MonkeyP
 
 
 def test_market_fundamentals_cli_prints_counts_and_depth_and_exits_0(
-    cli_env: Env, funds: None
+    cli_env: Env, funds: None, tmp_path: Path
 ) -> None:
     r = runner.invoke(app, [*cli_env[0], "market", "fundamentals", "AAPL"])
     assert r.exit_code == 0, r.output
     assert "AAPL" in r.output and "annual periods 2" in r.output and "filings: 4 listed" in r.output
-    assert scan_text(r.output) == [] and pv.edgar_contact() not in r.output
+    assert scan_output(r.output, tmp_path) == [] and pv.edgar_contact() not in r.output
 
 
 def test_market_fundamentals_shares_one_edgar_limiter_per_run(
@@ -323,7 +323,7 @@ def test_market_fundamentals_india_prints_shareholding(cli_env: Env, funds: None
 
 
 def test_market_fundamentals_india_prints_tapetide_counts_notes_and_quota(
-    cli_env: Env, funds: None, tape: tx.Tapetide
+    cli_env: Env, funds: None, tape: tx.Tapetide, tmp_path: Path
 ) -> None:
     r = runner.invoke(app, [*cli_env[0], "market", "fundamentals", "RELIANCE"])
     assert r.exit_code == 0, r.output
@@ -333,7 +333,7 @@ def test_market_fundamentals_india_prints_tapetide_counts_notes_and_quota(
         "Tapetide calls this run: 6 (6 attempted; today 6/400, month 6/5,000, "
         "daily resets 00:00 IST)" in r.output
     )
-    assert tape.calls == 6 and tx.token() not in r.output and scan_text(r.output) == []
+    assert tape.calls == 6 and tx.token() not in r.output and scan_output(r.output, tmp_path) == []
     again = runner.invoke(app, [*cli_env[0], "market", "fundamentals", "RELIANCE"])
     assert (
         "Tapetide calls this run: 0 (0 attempted; today 6/400, month 6/5,000, "
@@ -373,7 +373,11 @@ def test_cli_refuses_beyond_the_configured_plan_and_says_so(
 
 
 def test_market_fundamentals_india_runs_an_enabled_upstox_through_its_seam(
-    cli_env: Env, funds: None, tape: tx.Tapetide, monkeypatch: pytest.MonkeyPatch
+    cli_env: Env,
+    funds: None,
+    tape: tx.Tapetide,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     from tests.provider_fx import UPSTOX_CRED, UpstoxVendor, upstox_adapter, upstox_cred
 
@@ -388,7 +392,7 @@ def test_market_fundamentals_india_runs_an_enabled_upstox_through_its_seam(
     assert r.exit_code == 0, r.output
     assert vendor.calls == 5 and tape.calls == 6 and "corporate-actions" not in vendor.endpoints
     assert "Upstox gives none" in r.output and "Tapetide calls this run: 6" in r.output
-    assert upstox_cred() not in r.output and scan_text(r.output) == []
+    assert upstox_cred() not in r.output and scan_output(r.output, tmp_path) == []
 
 
 def test_market_fundamentals_help_does_not_claim_a_plan() -> None:
@@ -409,7 +413,7 @@ def test_market_fundamentals_india_prints_the_pledge_skipped_line(
 
 
 def test_market_fundamentals_india_lists_at_most_five_skipped_lines(
-    cli_env: Env, funds: None, tape: tx.Tapetide
+    cli_env: Env, funds: None, tape: tx.Tapetide, tmp_path: Path
 ) -> None:
     def drop(sec: dict[str, Any]) -> None:  # seven periods without a filing date
         gone = {a["period"] for a in sec["availability"][:7]}
@@ -420,7 +424,7 @@ def test_market_fundamentals_india_lists_at_most_five_skipped_lines(
     assert r.exit_code == 0, r.output
     assert "skipped periods: 7" in r.output
     assert r.output.count("  skipped: ") == 5 and "  and 2 more" in r.output
-    assert scan_text(r.output) == []
+    assert scan_output(r.output, tmp_path) == []
 
 
 def test_market_fundamentals_india_without_token_degrades_with_the_setup_hint(
@@ -491,14 +495,14 @@ def macro(cli_env: Env, monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
 
 
 def test_market_macro_cli_exit_codes_and_no_secret_in_output(
-    cli_env: Env, macro: list[httpx.Request]
+    cli_env: Env, macro: list[httpx.Request], tmp_path: Path
 ) -> None:
     r = runner.invoke(
         app, [*cli_env[0], "market", "macro", "--role", "usdinr", "--role", "fii_net"]
     )
     assert r.exit_code == 0, r.output
     assert "usdinr: 3 new points" in r.output and "fii_net: 1 new points" in r.output
-    assert pv.fred_key() not in r.output and scan_text(r.output) == []
+    assert pv.fred_key() not in r.output and scan_output(r.output, tmp_path) == []
     bad = runner.invoke(app, [*cli_env[0], "market", "macro", "--role", "bogus"])
     assert bad.exit_code == 1 and "unknown role" in bad.output
 
@@ -518,7 +522,7 @@ def test_market_macro_all_roles_reports_failed_source(
 
 
 def test_market_estimates_cli_us_and_india(
-    cli_env: Env, net: Net, monkeypatch: pytest.MonkeyPatch
+    cli_env: Env, net: Net, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from nivesh_adapters.estimates import Estimates
     from tests.market_fx import fmp_calendar, fmp_estimates
@@ -535,7 +539,7 @@ def test_market_estimates_cli_us_and_india(
     r = runner.invoke(app, [*cli_env[0], "market", "estimates", "AAPL"])
     assert r.exit_code == 0, r.output
     assert "AAPL (NASDAQ): " in r.output and "estimate values" in r.output  # clock is real
-    assert pv.fmp_key() not in r.output and scan_text(r.output) == []
+    assert pv.fmp_key() not in r.output and scan_output(r.output, tmp_path) == []
     r = runner.invoke(app, [*cli_env[0], "market", "estimates", "RELIANCE"])
     assert r.exit_code == 0 and "unavailable: no free estimates source for India" in r.output
 
@@ -561,7 +565,9 @@ def newsnet(cli_env: Env, net: Net, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cm, "_feeds", lambda: Feeds(c))
 
 
-def test_market_news_cli_counts_and_security_filter(cli_env: Env, newsnet: None) -> None:
+def test_market_news_cli_counts_and_security_filter(
+    cli_env: Env, newsnet: None, tmp_path: Path
+) -> None:
     cfg = Path(cli_env[0][1]) / "nivesh.yaml"
     cfg.write_text(
         cfg.read_text().replace(
@@ -573,7 +579,7 @@ def test_market_news_cli_counts_and_security_filter(cli_env: Env, newsnet: None)
     assert "new 3" in r.output and "untagged" in r.output
     r = runner.invoke(app, [*cli_env[0], "market", "news", "--security", "RELIANCE"])
     assert r.exit_code == 0 and "RELIANCE (NSE): 2 stored items" in r.output
-    assert "results" in r.output and scan_text(r.output) == []
+    assert "results" in r.output and scan_output(r.output, tmp_path) == []
     r = runner.invoke(app, [*cli_env[0], "market", "news", "--security", "ZZZZQQ"])
     assert r.exit_code == 1 and "no security matches" in r.output
 

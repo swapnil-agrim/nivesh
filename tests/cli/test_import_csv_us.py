@@ -7,7 +7,7 @@ from nivesh_cli.main import app
 from nivesh_core.db import init_stores
 from nivesh_core.db.sqlite import open_sqlite
 from nivesh_core.holdings_store import latest_holdings, latest_lots
-from nivesh_core.pii_scan import scan_text
+from tests.scan_fx import scan_output
 
 runner = CliRunner()
 Env = tuple[list[str], Path]
@@ -120,10 +120,10 @@ def test_us_preset_imports(cli_env: Env) -> None:
     c.close()
 
 
-def test_us_import_output_and_logs_contain_no_pii_strings(cli_env: Env) -> None:
+def test_us_import_output_and_logs_contain_no_pii_strings(cli_env: Env, tmp_path: Path) -> None:
     args, _ = cli_env
     bad = runner.invoke(app, [*args, "import-csv", str(FX / "us_invalid.csv"), "--market", "us"])
     ok = runner.invoke(app, [*args, "import-csv", str(FX / "us_alpaca.csv"), "--market", "us",
                              "--preset", "alpaca", "--label", "P"])  # fmt: skip
     for r in (bad, ok):
-        assert scan_text(r.output) == []
+        assert scan_output(r.output, tmp_path) == []

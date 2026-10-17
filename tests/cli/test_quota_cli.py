@@ -16,8 +16,8 @@ from nivesh_core.db import init_stores
 from nivesh_core.db.duck import open_duck
 from nivesh_core.db.sqlite import open_sqlite
 from nivesh_core.fundamentals_config import PlanSettings
-from nivesh_core.pii_scan import scan_text
 from nivesh_core.quota import Budget, add_manual
+from tests.scan_fx import scan_output
 
 runner = CliRunner()
 Env = tuple[list[str], Path]
@@ -57,7 +57,9 @@ def rows(env: Env, table: str, where: str = "1") -> list[tuple[Any, ...]]:
         c.close()
 
 
-def test_status_on_a_fresh_store_shows_both_windows_and_their_resets(cli_env: Env) -> None:
+def test_status_on_a_fresh_store_shows_both_windows_and_their_resets(
+    cli_env: Env, tmp_path: Path
+) -> None:
     r = run(cli_env, "status")
     assert r.exit_code == 0, r.output
     assert "tapetide" in r.output
@@ -65,11 +67,11 @@ def test_status_on_a_fresh_store_shows_both_windows_and_their_resets(cli_env: En
     assert "month 2026-10-01 to 2026-10-31: 0 of 5,000 used, 5,000 left" in r.output
     assert "limit from config; resets 00:00 IST" in r.output
     assert "limit from config; resets 00:00 IST on 2026-11-01" in r.output
-    assert "warning" not in r.output and scan_text(r.output) == []
+    assert "warning" not in r.output and scan_output(r.output, tmp_path) == []
 
 
 def test_status_after_calls_shows_used_remaining_manual_and_the_80_percent_warning(
-    cli_env: Env,
+    cli_env: Env, tmp_path: Path
 ) -> None:
     spend(cli_env, 3, manual=2)
     r = run(cli_env, "status")
@@ -80,7 +82,7 @@ def test_status_after_calls_shows_used_remaining_manual_and_the_80_percent_warni
     again = run(cli_env, "status")
     assert "5 of 6 used, 1 left; limit from override" in again.output
     assert "warning: tapetide daily quota at 5 of 6 (83%)" in again.output
-    assert scan_text(again.output) == []
+    assert scan_output(again.output, tmp_path) == []
 
 
 def test_status_vendor_filter_and_an_unknown_vendor_is_an_error(cli_env: Env) -> None:
@@ -91,7 +93,7 @@ def test_status_vendor_filter_and_an_unknown_vendor_is_an_error(cli_env: Env) ->
     assert "error: unknown vendor 'x'; vendors with a plan: tapetide" in bad.output
 
 
-def test_status_json_has_exact_integer_fields(cli_env: Env) -> None:
+def test_status_json_has_exact_integer_fields(cli_env: Env, tmp_path: Path) -> None:
     spend(cli_env, 3, manual=2)
     r = run(cli_env, "status", "--json")
     assert r.exit_code == 0, r.output
@@ -107,15 +109,20 @@ def test_status_json_has_exact_integer_fields(cli_env: Env) -> None:
     assert all(
         type(v[w][k]) is int for w in ("day", "month") for k in ("used", "limit", "remaining")
     )
-    assert scan_text(r.output) == []
+    assert scan_output(r.output, tmp_path) == []
 
 
-def test_set_daily_appends_an_override_and_leaves_the_config_alone(cli_env: Env) -> None:
+def test_set_daily_appends_an_override_and_leaves_the_config_alone(
+    cli_env: Env, tmp_path: Path
+) -> None:
     cfg = Path(cli_env[0][1]) / "nivesh.yaml"
     before = cfg.read_text()
     r = run(cli_env, "set", "tapetide", "--daily", "300")
     assert r.exit_code == 0, r.output
-    assert "wrote tapetide limit override: daily 300" in r.output and scan_text(r.output) == []
+    assert (
+        "wrote tapetide limit override: daily 300" in r.output
+        and scan_output(r.output, tmp_path) == []
+    )
     assert (
         "today 2026-10-09: 0 of 300 used, 300 left; limit from override"
         in run(cli_env, "status").output
@@ -162,12 +169,12 @@ def test_set_needs_at_least_one_option_and_a_known_vendor(cli_env: Env) -> None:
     assert rows(cli_env, "vendor_limit") == []
 
 
-def test_used_today_tops_the_day_up_with_one_manual_row(cli_env: Env) -> None:
+def test_used_today_tops_the_day_up_with_one_manual_row(cli_env: Env, tmp_path: Path) -> None:
     r = run(cli_env, "set", "tapetide", "--used-today", "120")
     assert r.exit_code == 0, r.output
     assert "wrote 120 manual calls for tapetide on 2026-10-09 (the ledger showed 0)" in r.output
     manual = rows(cli_env, "vendor_call", "kind = 'manual'")
-    assert len(manual) == 1 and scan_text(r.output) == []
+    assert len(manual) == 1 and scan_output(r.output, tmp_path) == []
     assert "today 2026-10-09: 120 of 400 used, 280 left" in run(cli_env, "status").output
 
 

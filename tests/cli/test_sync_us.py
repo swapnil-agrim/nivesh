@@ -11,8 +11,8 @@ from nivesh_cli.main import app
 from nivesh_core.db import init_stores
 from nivesh_core.db.sqlite import open_sqlite
 from nivesh_core.holdings_store import latest_holdings
-from nivesh_core.pii_scan import scan_text
 from tests import pii_values as pv
+from tests.scan_fx import scan_output
 
 runner = CliRunner()
 Env = tuple[list[str], Path]
@@ -81,7 +81,7 @@ def test_sync_us_non_usd_account_refused(ready: Env, monkeypatch: pytest.MonkeyP
     ).fetchone() == (0,)
 
 
-def test_sync_us_output_has_no_secret_or_account_values(ready: Env) -> None:
+def test_sync_us_output_has_no_secret_or_account_values(ready: Env, tmp_path: Path) -> None:
     args, _ = ready
     r = runner.invoke(app, [*args, "sync-us"])
     for bad in (
@@ -92,7 +92,7 @@ def test_sync_us_output_has_no_secret_or_account_values(ready: Env) -> None:
         "AAPL",
     ):
         assert bad not in r.output
-    assert scan_text(r.output) == []
+    assert scan_output(r.output, tmp_path) == []
 
 
 def test_sync_us_auth_failure_exits_1_without_echoing_secrets(
